@@ -6,7 +6,7 @@
 // ever confused it, we still want the worker to send ONLY plain text to our
 // backend: never images, image URLs, blob: URLs or base64 data. The backend
 // checks this too (backend/src/validate.ts); this is a second, earlier check.
-import { LIMITS, type ExtensionMessage, type SourceType, type TextSource } from "../../shared/contract";
+import { HISTORY_LIMITS, LIMITS, type ExtensionMessage, type SourceType, type TextSource } from "../../shared/contract";
 
 const SOURCE_TYPES: SourceType[] = ["caption", "image_text", "history"];
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -99,6 +99,25 @@ export function parseExtensionMessage(raw: unknown): Parsed<ExtensionMessage> {
 
     case "get-backend-status":
       return { ok: true, value: { kind: "get-backend-status" } };
+
+    case "save-to-history": {
+      const { caption, imageText, publishedAt } = raw;
+      if (typeof caption !== "string" || typeof imageText !== "string") {
+        return { ok: false, reason: "caption and imageText must be text." };
+      }
+      if (!caption.trim() && !imageText.trim()) return { ok: false, reason: "There's nothing to save." };
+      for (const [what, text] of [["The caption", caption], ["The photo text", imageText]] as const) {
+        if (text.length > HISTORY_LIMITS.maxCharsPerPost) {
+          return { ok: false, reason: `${what} is too long to save (max ${HISTORY_LIMITS.maxCharsPerPost} characters).` };
+        }
+        const problem = nonTextProblem(text);
+        if (problem) return { ok: false, reason: `${what} ${problem}. Only text can be saved.` };
+      }
+      if (typeof publishedAt !== "string" || Number.isNaN(Date.parse(publishedAt)) || Date.parse(publishedAt) > Date.now() + 5 * 60_000) {
+        return { ok: false, reason: "publishedAt must be an ISO 8601 date, not in the future." };
+      }
+      return { ok: true, value: { kind: "save-to-history", caption, imageText, publishedAt } };
+    }
 
     default:
       return { ok: false, reason: "Unknown message kind." };

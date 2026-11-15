@@ -12,6 +12,7 @@
 // The worker talks ONLY to our local backend (BACKEND_URL in api.ts). It never
 // talks to Databricks and holds no credentials.
 import { analyzeDraft, checkHealth, describeBackendStatus } from "./api";
+import { importHistory } from "./history-api";
 import { handleOcrImageMessage, isOcrImageMessage, type OcrRunMessage, type OcrRunReply } from "./ocr-relay";
 import { noHistory } from "./ports";
 import { handleWorkerMessage } from "./worker-handler";
@@ -33,6 +34,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     history: noHistory,
     // The Instagram panel's status pill: same wording as the popup's.
     backendStatus: async () => describeBackendStatus(await checkHealth()),
+    // "Save to history" after a confirmed share (the user clicked Save).
+    saveToHistory: async (post: Parameters<typeof importHistory>[0][number]) => {
+      await importHistory([post]);
+    },
   };
   handleWorkerMessage(message, sender, deps).then(sendResponse);
   // Returning true keeps the reply channel open while we wait for the backend.
@@ -41,7 +46,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 function isForWorker(message: unknown): boolean {
   const kind = (message as { kind?: unknown } | null)?.kind;
-  return kind === "check-draft" || kind === "post-published" || kind === "get-backend-status";
+  return kind === "check-draft" || kind === "post-published" || kind === "get-backend-status" || kind === "save-to-history";
 }
 
 // ---------------------------------------------------------------------------

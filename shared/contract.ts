@@ -349,6 +349,10 @@ export interface HistoryDeleteResponse {
  *                           page showed a confirmed publication (not on cancel,
  *                           failure or "unknown").
  *  - "get-instagram-draft": popup -> content script. Reply: InstagramDraftReply.
+ *  - "save-to-history":     content script -> service worker, ONLY after the user
+ *                           clicked "Save" on the prompt shown after a CONFIRMED
+ *                           share. The worker imports it as one approved, published
+ *                           history post (text only). Reply: SaveToHistoryReply.
  *  - "get-backend-status":  content script -> service worker. The worker asks
  *                           GET /api/health (no Databricks call) and replies with
  *                           a BackendStatusReply for the Instagram panel's pill.
@@ -357,7 +361,13 @@ export type ExtensionMessage =
   | { kind: "check-draft"; requestId: number; draftHash: string; sources: TextSource[] }
   | { kind: "post-published"; draftHash: string; postId: string | null; publishedAt: string }
   | { kind: "get-instagram-draft" }
-  | { kind: "get-backend-status" };
+  | { kind: "get-backend-status" }
+  | { kind: "save-to-history"; caption: string; imageText: string; publishedAt: string };
+
+/** Reply to "save-to-history". */
+export type SaveToHistoryReply =
+  | { kind: "history-saved"; postId: string }
+  | { kind: "history-error"; message: string };
 
 /**
  * Reply to "get-backend-status": what the status pill shows. Same values as

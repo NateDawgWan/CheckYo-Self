@@ -5,6 +5,8 @@
 import {
   CONTRACT_VERSION,
   USER_ID_HEADER,
+  type AnalyzeRequest,
+  type AnalyzeResponse,
   type ErrorResponse,
   type HistoryDeleteResponse,
   type HistoryImportRequest,
@@ -66,4 +68,14 @@ export function revokeApproval(approvalId: string): Promise<HistoryDeleteRespons
 /** Deletes ALL of this user's saved posts and the AI interpretations made from them. */
 export function deleteAllHistory(): Promise<HistoryDeleteResponse> {
   return call("DELETE", "/api/history");
+}
+
+/**
+ * Checks a draft TOGETHER WITH earlier posts the user chose (by postId).
+ * The backend adds exactly those posts as "history:<postId>" sources and
+ * refuses unknown ones. Only used when the user opted in for this check.
+ */
+export function analyzeWithHistory(sources: TextSource[], draftHash: string, historyPostIds: string[]): Promise<AnalyzeResponse> {
+  const body: AnalyzeRequest = { contractVersion: CONTRACT_VERSION, draftHash, sources, historyPostIds };
+  return call("POST", "/api/analyze", body);
 }

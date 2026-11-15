@@ -38,6 +38,16 @@ const PANEL_CSS = `
 .photos-note { margin: 8px 0; padding: 8px 10px; border: 2px solid var(--asphalt, #151515); background: var(--amber, #f0a43a); color: var(--asphalt, #151515); font-weight: 700; font-size: 13px; }
 .photos-note.is-done { background: var(--lime, #d6f04a); }
 .photos-note[hidden] { display: none; }
+.save-card {
+  position: fixed; right: 20px; bottom: 20px; z-index: 2147483647; width: 340px; max-width: calc(100vw - 40px);
+  padding: 12px 14px; background: var(--paper); border: 2px solid var(--asphalt, #151515); box-shadow: 4px 4px 0 var(--asphalt, #151515);
+  font: 13.5px/1.45 var(--ui-font); color: var(--ink);
+}
+.save-card[hidden], .save-buttons[hidden] { display: none; }
+.save-card[data-state="ok"] { background: var(--lime, #d6f04a); }
+.save-card[data-state="error"] { background: var(--high-mark, #f9d3cf); }
+.save-text { margin: 0 0 8px; }
+.save-buttons { display: flex; gap: 8px; justify-content: flex-end; }
 .intro { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .share-ready { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--low-mark); color: var(--low); font-weight: 600; }
 .actions { flex-wrap: wrap; }
@@ -160,7 +170,19 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const resultEls: ResultElements = { root: results, summary, markedDraft, findings, meta, mockBanner, incompleteBanner };
 
   panel.append(head, intro, photosNote, photoBlocks, consent, buttonRow, shareReady, message, results);
-  shadow.append(style, launcher, panel);
+  // "Save this post to your history?" after a confirmed share. Never automatic.
+  const saveCard = el("section", "save-card");
+  saveCard.hidden = true;
+  saveCard.setAttribute("role", "dialog");
+  saveCard.setAttribute("aria-label", "Save to CheckYo'Self history");
+  const saveText = el("p", "save-text");
+  const saveButtons = el("div", "save-buttons");
+  const saveYes = button("Save to history", "primary small", () => actions.onSaveToHistory());
+  const saveNo = button("No thanks", "secondary small", () => actions.onSkipSave());
+  saveButtons.append(saveNo, saveYes);
+  saveCard.append(saveText, saveButtons);
+
+  shadow.append(style, launcher, panel, saveCard);
   document.documentElement.append(host);
 
   let hasResult = false;
@@ -272,6 +294,19 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       shareReady.hidden = !ready;
       isShareReady = ready;
       updateLauncherText();
+    },
+    setSavePrompt(state) {
+      saveCard.hidden = state.kind === "hidden";
+      saveButtons.hidden = state.kind !== "ask";
+      saveCard.dataset.state = state.kind === "done" ? (state.ok ? "ok" : "error") : state.kind;
+      saveText.textContent =
+        state.kind === "ask"
+          ? "Posted. Save it to your CheckYo'Self history? Later checks can then spot what your posts reveal together. Only the caption and photo text are saved; delete it any time."
+          : state.kind === "saving"
+            ? "Saving…"
+            : state.kind === "done"
+              ? state.text
+              : "";
     },
     setLauncherPrompt(text) {
       launcherPrompt = text;

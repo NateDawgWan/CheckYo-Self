@@ -594,3 +594,15 @@ mark.flash, .finding.flash { animation: flash 1.2s ease-out; }
 /* Link to the history page (history.html). */
 .history-link { margin: 14px 0 0; font: 600 12px/1.2 var(--mono, monospace); text-transform: uppercase; letter-spacing: 0.06em; }
 .history-link a { color: var(--ink); }
+
+/* "Compare with my past posts" (optional, closed by default). */
+.compare { margin: 10px 0 4px; }
+.link-button { background: none; border: none; padding: 2px 0; color: var(--ink); font: 600 12.5px/1.3 var(--mono, monospace); text-transform: uppercase; letter-spacing: 0.05em; text-decoration: underline; cursor: pointer; box-shadow: none; }
+.link-button .optional { text-transform: none; font-weight: 400; color: var(--muted); }
+.compare-panel { margin-top: 6px; padding: 10px 12px; background: var(--surface); border: 2px solid var(--asphalt); }
+.compare-list { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 6px; max-height: 220px; overflow: auto; }
+.compare-list label { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; margin: 0; font-weight: 400; font-size: 12.5px; }
+.compare-caption { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compare-meta { grid-column: 2; font-size: 11px; color: var(--muted); }
+.compare-links { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 0; font-size: 12px; }
+.compare-links a { color: var(--ink); }

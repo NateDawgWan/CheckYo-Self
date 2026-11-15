@@ -13,6 +13,7 @@
 // share-flow.ts, which is unit-tested.
 import type {
   BackendStatusReply,
+  SaveToHistoryReply,
   CheckDraftReply,
   ExtensionMessage,
   InstagramDraftReply,
@@ -71,6 +72,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   let queueRunning = false;
   let reachedLastSlide = false; // the carousel's last photo was shown (no "next" arrow)
   let sharedDraftHash: Promise<string> | null = null; // hash of the draft that was shared
+  let sharedPost: { caption: string; imageText: string } | null = null; // its text, for "Save to history?"
+  let pendingSave: { caption: string; imageText: string; publishedAt: string } | null = null;
+  let saveHideTimer: ReturnType<typeof setTimeout> | undefined;
 
   // -------------------------------------------------------------------------
   // The draft
@@ -279,11 +283,41 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     onApplyEdit(edit) {
       void applyEdit(edit);
     },
+    onSaveToHistory() {
+      void saveSharedPost();
+    },
+    onSkipSave() {
+      pendingSave = null;
+      getPanel().setSavePrompt({ kind: "hidden" });
+    },
     onImageTextInput(text, index) {
       photos.setTyped(index, text);
       draftChanged();
     },
   };
+
+  /** The user clicked "Save to history" on the after-share card. */
+  async function saveSharedPost() {
+    const p = getPanel();
+    if (!pendingSave) return p.setSavePrompt({ kind: "hidden" });
+    const message: ExtensionMessage = { kind: "save-to-history", ...pendingSave };
+    p.setSavePrompt({ kind: "saving" });
+    let reply: SaveToHistoryReply | { kind: "rejected"; reason: string } | undefined;
+    try {
+      reply = await chrome.runtime.sendMessage(message);
+    } catch {
+      reply = undefined;
+    }
+    if (reply?.kind === "history-saved") {
+      pendingSave = null;
+      p.setSavePrompt({ kind: "done", ok: true, text: "Saved to your history ✓ Manage it from the CheckYo'Self popup → Your past posts." });
+      saveHideTimer = setTimeout(() => p.setSavePrompt({ kind: "hidden" }), 6000);
+    } else {
+      const why = reply?.kind === "history-error" ? reply.message : reply?.kind === "rejected" ? reply.reason : "CheckYo'Self was reloaded. Refresh this page.";
+      p.setSavePrompt({ kind: "done", ok: false, text: `Couldn't save it: ${why}` });
+      saveHideTimer = setTimeout(() => p.setSavePrompt({ kind: "hidden" }), 10000);
+    }
+  }
 
   async function checkDraft() {
     snapshot = readComposer(document);
@@ -427,6 +461,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       // The user's own click goes through to Instagram, untouched.
       snapshot = readComposer(document);
       sharedDraftHash = hashSources(currentSources());
+      sharedPost = { caption: snapshot.caption, imageText: photos.joinedText() };
       const p = getPanel();
       p.setShareReady(false);
       p.close();
@@ -486,7 +521,15 @@ export function startInstagramIntegration(options: IntegrationOptions) {
 
   async function reportOutcome(outcome: PublishOutcome) {
     console.info(`[CheckYo'Self] Share outcome: ${outcome}`);
+    const post = sharedPost;
+    sharedPost = null;
     if (outcome !== "published" || !sharedDraftHash) return; // only CONFIRMED posts count
+    // Ask (never automatic) whether to save it to history.
+    if (post && (post.caption.trim() || post.imageText.trim())) {
+      pendingSave = { ...post, publishedAt: new Date().toISOString() };
+      clearTimeout(saveHideTimer);
+      getPanel().setSavePrompt({ kind: "ask" });
+    }
     const message: ExtensionMessage = {
       kind: "post-published",
       draftHash: await sharedDraftHash,
