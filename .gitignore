@@ -1,0 +1,28 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+extension/dist/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.log
+
+# Credentials and keys
+*.pem
+*.key
+credentials.json
+.databrickscfg
+
+# Other generated build output
+dist/
+build/
+*.tsbuildinfo
+
+# Source archives (the original project ZIP is not committed)
+*.zip
