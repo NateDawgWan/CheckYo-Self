@@ -29,6 +29,7 @@ Chrome extension (TypeScript, MV3)        Backend (Node + Express, TypeScript)  
 - History requests carry the `X-Second-Look-User` header (a random per-install id). Every store method is per user; never read or delete across users.
 - Only text crosses the network: never images, image URLs, base64, or page HTML. `backend/src/validate.ts` enforces this.
 - `shared/contract.ts` is the single source of truth for the request/response format. Both sides import it. Change it first, then fix the type errors on both sides. Bump `CONTRACT_VERSION` on breaking changes.
+- Unreliable OCR is never used: when `describePhotoRead()` rates a read "poor" (low average confidence, or most words unclear, e.g. a photo of a building), the photo-text box stays empty and the user is told; guessed letters are never sent to the AI. Noisy but mostly readable reads are filled in with a notice.
 - Observed vs. AI-generated: `Evidence` (quote + `verified`) is observed text; `exposure`, `uncertainty`, `suggestedEdits` are AI interpretation. The backend, not the model, sets `verified` and `crossSource`.
 - Evidence verification (`backend/src/parse.ts`):
   - `verified: true` means the quote appears in the named source's text (case- and whitespace-insensitive). It proves the text exists, not that the AI's interpretation is right.
@@ -68,7 +69,7 @@ extension/src/dashboard/      Full-page dashboard (public/dashboard.html, opened
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
 extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
 extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo
-extension/src/photo-text.ts   Photo-text rules: strict 1000-char limit, poor-quality/noise notices (tested)
+extension/src/photo-text.ts   Photo-text rules (popup + Instagram): unreliable reads are discarded (empty box + notice), noisy reads get a notice, strict 1000-char limit (tested)
 extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
 extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
 extension/src/ports.ts        Interfaces + stand-ins for OCR, the warning panel, history

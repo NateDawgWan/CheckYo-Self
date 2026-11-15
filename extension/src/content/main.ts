@@ -20,8 +20,8 @@ import type {
 } from "../../../shared/contract";
 import { hashSources } from "../api";
 import { applyEditToText } from "../edits";
-import { assessPhotoQuality, limitPhotoText, PHOTO_TEXT_MAX_CHARS, truncationNotice } from "../photo-text";
-import type { OcrPort, PhotoNotice, WarningPanel, WarningPanelActions } from "../ports";
+import { describePhotoRead, PHOTO_TEXT_MAX_CHARS } from "../photo-text";
+import type { OcrPort, WarningPanel, WarningPanelActions } from "../ports";
 import { offscreenOcr } from "./offscreen-ocr";
 import {
   detectPublishOutcome,
@@ -186,25 +186,15 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       const result = await options.ocr.readImageText(blob, 1); // stays inside the browser
       if (myTurn !== ocrTurn) return;
 
-      // Strict size limit (demo safety): keep at most PHOTO_TEXT_MAX_CHARS.
-      const limited = limitPhotoText(result.text);
-      // Tell the user explicitly when the read is noisy or unreliable.
-      const quality = assessPhotoQuality(result);
-      const notices: PhotoNotice[] = [];
-      if (quality.message) notices.push({ kind: quality.level === "poor" ? "poor" : "warning", text: quality.message });
-      if (limited.truncated) notices.push({ kind: "warning", text: truncationNotice(limited) });
-      p.setPhotoNotices(notices);
-      if (limited.truncated || quality.level === "poor" || quality.level === "noisy") {
-        console.info(`[CheckYo'Self] Photo read: quality=${quality.level}, truncated=${limited.truncated}`); // no photo text in logs
+      // Same rules as the popup (src/photo-text.ts): an unreliable read is
+      // thrown away (empty box + notice), a noisy one gets a notice, and the
+      // text is cut to the strict PHOTO_TEXT_MAX_CHARS limit.
+      const view = describePhotoRead(result);
+      p.setPhotoNotices(view.notices);
+      if (view.truncated || view.quality !== "clean") {
+        console.info(`[CheckYo'Self] Photo read: quality=${view.quality}, discarded=${view.discarded}, truncated=${view.truncated}`); // no photo text in logs
       }
-
-      const sure = result.confidence === null ? "" : ` (confidence ${Math.round(result.confidence)}%)`;
-      showOcrText(
-        limited.text,
-        result.status === "no_text"
-          ? "No text found in the photo. Type any text you can see in it."
-          : `Read from the photo on your computer${sure}. Check it and fix any mistakes before checking the post.`,
-      );
+      showOcrText(view.text, view.hint);
     } catch (err) {
       if (myTurn !== ocrTurn) return;
       // OCR errors carry a user-readable message (src/ocr/README.md). A failure is never "no text".
