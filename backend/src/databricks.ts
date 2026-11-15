@@ -18,6 +18,15 @@ import type { ChatMessage } from "./prompt";
 
 export const TIMEOUT_MS = 45_000;
 
+/**
+ * Most tokens the model may WRITE per analysis (its answer, plus the hidden
+ * reasoning gpt-oss does first). 2000 was too small: posts with many things to
+ * flag got their JSON cut off mid-sentence ("malformed JSON"). 4000 is the
+ * highest the Databricks App relay accepts (MAX_TOKENS_CAP in databricks-app/app.py).
+ * The model stops as soon as it's done, so a higher limit doesn't slow short answers.
+ */
+export const MAX_OUTPUT_TOKENS = 4000;
+
 export interface DatabricksClientOptions {
   /** App or workspace URL, no trailing slash. */
   host: string;
@@ -180,7 +189,7 @@ export async function chat(
   messages: ChatMessage[],
   timeoutMs?: number,
 ): Promise<string> {
-  const data = await client.requestJson("POST", path, { messages, max_tokens: 2000, temperature: 0.1 }, timeoutMs);
+  const data = await client.requestJson("POST", path, { messages, max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.1 }, timeoutMs);
   const text = extractText(data);
   if (!text) throw new AppError("BAD_MODEL_OUTPUT", 502, "Databricks response had no text content.");
   return text;

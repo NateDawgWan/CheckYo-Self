@@ -42,8 +42,10 @@ The backend still supports `DATABRICKS_AUTH_TYPE=pat` as the handoff describes, 
 Unchanged from the handoff. The backend sends:
 
 ```json
-{ "messages": [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}], "max_tokens": 2000, "temperature": 0.1 }
+{ "messages": [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}], "max_tokens": 4000, "temperature": 0.1 }
 ```
+
+`max_tokens` is 4000, the relay's cap (`MAX_TOKENS_CAP`). It was 2000 until 2026-11-15, which cut long answers off mid-JSON. Note: the relay always returns `finish_reason: "stop"`, even when the model was cut off; passing the model's real `finish_reason` through would let the backend report "answer too long" instead of "malformed JSON".
 
 and expects:
 
