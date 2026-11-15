@@ -64,9 +64,9 @@ else if (out.reason === "too_long") showError(out.message); // "empty" = just le
 
 **Evidence ids.** Words are `image_text:<n>#w<k>` and lines `image_text:<n>#l<k>`, numbered in reading order. The same image and engine version always give the same ids. They identify OCR evidence inside the extension. The backend only sees the `image_text:<n>` source id and quotes.
 
-## Integration instructions for the popup owner (owner 2)
+## Popup integration (done)
 
-This PR does **not** touch `popup.ts`, `render.ts`, `popup.html` or `popup.css`. Here is what to add there. `demo/demo.ts` is a complete working example of every step.
+**Status:** steps 1-3 and 5 below are done: the popup has "Add a photo" (`popup.ts`, `popup.html`), with progress, Stop reading, Remove photo, the 1000-character limit and the quality notices from `describePhotoRead()` in `src/photo-text.ts`. Step 4 (highlights on the photo preview) is not done yet. The original instructions are kept below for reference. `demo/demo.ts` is a complete working example of every step.
 
 1. **`popup.html`**: next to the existing "Text in the photo" textarea (`#image-text`), add:
    - `<input type="file" id="photo" accept="image/*">`

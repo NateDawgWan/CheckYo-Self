@@ -9,7 +9,9 @@ import { pageToOcrResult, type RawPage } from "../src/ocr/convert";
 import type { OcrResult, OcrWord } from "../src/ocr/types";
 import {
   assessPhotoQuality,
+  describePhotoRead,
   isJunkWord,
+  photoProgressLabel,
   limitPhotoText,
   PHOTO_TEXT_MAX_CHARS,
   truncationNotice,
@@ -135,4 +137,42 @@ test("an over-long source is reported in plain words, not 'sources[1]'", () => {
   const parsed = parseExtensionMessage(msg);
   assert.equal(parsed.ok, false);
   assert.match(!parsed.ok ? parsed.reason : "", /^The photo text is too long to check \(5500 characters; the limit is 5000\)/);
+});
+
+// --- 4. what the popup shows after a read (describePhotoRead) -----------------------
+
+test("a clean read fills the box with no notices and says to check it", () => {
+  const view = describePhotoRead(ocr([word("Coach"), word("Dana"), word("608-555-0142")]));
+  assert.equal(view.text, "Coach Dana 608-555-0142");
+  assert.deepEqual(view.notices, []);
+  assert.equal(view.quality, "clean");
+  assert.ok(view.hint.startsWith("Read from the photo on your computer (confidence 90%). Check it"), view.hint);
+});
+
+test("a poor read keeps the text for review but warns explicitly", () => {
+  const view = describePhotoRead(ocr([word("oO", 30), word("=", 20), word("©", 20)]));
+  assert.equal(view.quality, "poor");
+  assert.equal(view.notices.length, 1);
+  assert.equal(view.notices[0].kind, "poor");
+  assert.match(view.notices[0].text, /^Poor photo quality/);
+});
+
+test("an over-long read is cut to the limit and says so", () => {
+  const view = describePhotoRead(ocr(Array.from({ length: 300 }, () => word("Riverside"))));
+  assert.ok(view.text.length <= PHOTO_TEXT_MAX_CHARS);
+  assert.equal(view.truncated, true);
+  assert.ok(view.notices.some((n) => n.kind === "warning" && /character limit/.test(n.text)));
+});
+
+test("no text found: empty box and a hint to type it", () => {
+  const view = describePhotoRead(ocr([]));
+  assert.equal(view.text, "");
+  assert.deepEqual(view.notices, []);
+  assert.match(view.hint, /^No text found in the photo/);
+});
+
+test("progress labels name the stage and clamp the percentage", () => {
+  assert.equal(photoProgressLabel("recognizing", 0.4), "Reading text… 40%");
+  assert.equal(photoProgressLabel("loading_engine", 1.7), "Starting the text reader… 100%");
+  assert.equal(photoProgressLabel("preparing_image", -1), "Opening the photo… 0%");
 });

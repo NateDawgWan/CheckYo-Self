@@ -2,7 +2,7 @@
 
 A Chrome extension that shows what an Instagram post could reveal about you before you share it, including things that only become revealing when combined with your earlier posts. Built for MadHacks 2026.
 
-**Status: milestones 1 and 4.** The popup sends a caption (and optional, hand-typed photo text) to a small local backend, which asks a Databricks-hosted LLM for structured privacy findings and shows them, linked to the exact text they're based on. On instagram.com, the same check is offered before you share a single-photo post. OCR and post history come next (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+**Status: milestones 1 and 4.** The popup sends a caption and the text in the photo (read on your computer with local OCR when you add a photo, or typed) to a small local backend, which asks a Databricks-hosted LLM for structured privacy findings and shows them, linked to the exact text they're based on. On instagram.com, the same check is offered before you share a single-photo post. Post history in the extension comes next (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## What you need
 

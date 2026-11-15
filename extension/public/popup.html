@@ -19,8 +19,20 @@
         <textarea id="caption" rows="5" placeholder="Write or paste a caption"></textarea>
 
         <label for="image-text">Text in the photo</label>
-        <p class="hint">Type it by hand for now. Milestone 2 reads it from the photo automatically, on your computer.</p>
-        <textarea id="image-text" rows="2" placeholder="e.g. a sign, name tag or jersey in the photo"></textarea>
+        <p class="hint">Add a photo to read its text on this computer (the photo is never uploaded), or type it yourself.</p>
+        <div class="photo-pick">
+          <input id="photo" type="file" accept="image/*" class="visually-hidden" />
+          <label class="file-button" for="photo">Add a photo</label>
+          <button id="photo-cancel" type="button" class="secondary small" hidden>Stop reading</button>
+          <button id="photo-remove" type="button" class="secondary small" hidden>Remove photo</button>
+        </div>
+        <div id="photo-preview-wrap" class="photo-preview" hidden>
+          <img id="photo-preview" alt="The photo you picked. It stays on this computer." />
+        </div>
+        <progress id="photo-progress" class="photo-progress" max="1" value="0" hidden></progress>
+        <p id="photo-status" class="hint" role="status" aria-live="polite"></p>
+        <div id="photo-notices" class="photo-notices"></div>
+        <textarea id="image-text" rows="3" placeholder="e.g. a sign, name tag or jersey in the photo"></textarea>
 
         <div class="actions">
           <button id="load-sample" type="button" class="secondary">Use sample post</button>
