@@ -24,6 +24,7 @@ let analyzer: AppDeps["analyze"];
 let extractor: ((messages: { role: string; content: string }[]) => Promise<string>) | null = null;
 let extractCalls = 0;
 let lastSources: TextSource[] = [];
+let lastTask: string | undefined;
 let store: DevMemoryHistoryStore;
 let baseUrl = "";
 let server: ReturnType<ReturnType<typeof createApp>["listen"]>;
@@ -36,8 +37,9 @@ before(async () => {
     mode: "databricks",
     model: "gpt-oss-120b",
     promptVersion: "test",
-    analyze: (sources) => {
+    analyze: (sources, task) => {
       lastSources = sources;
+      lastTask = task;
       return analyzer(sources);
     },
     get historyStore() {
@@ -67,6 +69,7 @@ after(() => {
 beforeEach(() => {
   store = new DevMemoryHistoryStore();
   lastSources = [];
+  lastTask = undefined;
   analyzer = async () => ({ summary: "ok", findings: [], droppedFindings: 0 });
 });
 
@@ -494,4 +497,61 @@ test("checks with usePortfolio add ONE profile source with every fact and its qu
 test("usePortfolio needs a user id and must be true or false", async () => {
   assert.equal((await call("POST", "/api/analyze", null, { ...analyzeBody("hi"), usePortfolio: true })).status, 400);
   assert.equal((await call("POST", "/api/analyze", ALICE, { ...analyzeBody("hi"), usePortfolio: "yes" })).status, 400);
+});
+
+// --- Assessing saved posts together (POST /api/history/assess) ------------------------
+
+function assessBody(postIds: unknown) {
+  return { contractVersion: CONTRACT_VERSION, postIds };
+}
+
+test("assess: the chosen saved posts are analyzed together, as history, and cross-post findings come back", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([
+    post("p1", "So proud of Mia on her first day!", "2026-09-01T08:00:00Z"),
+    post("p2", "Pickup at Lincoln Elementary at 3pm", "2026-09-10T15:00:00Z"),
+    post("p3", "Beach day", "2026-09-20T12:00:00Z"),
+  ]));
+  analyzer = async (sources) =>
+    parseModelOutput(
+      JSON.stringify({
+        summary: "Together these posts name a child and her school pickup time.",
+        findings: [{
+          category: "children", severity: "high", exposure: "A child's first name, school and pickup time.",
+          evidence: [{ sourceId: "history:p1", quote: "Mia" }, { sourceId: "history:p2", quote: "Lincoln Elementary at 3pm" }],
+          confidence: "medium", uncertainty: "Assumes Mia goes to that school.", suggestedEdits: [],
+        }],
+      }),
+      sources,
+    );
+  const res = await call("POST", "/api/history/assess", ALICE, assessBody(["p2", "p1"]));
+  assert.equal(res.status, 200);
+  assert.equal(lastTask, "history");
+  assert.deepEqual(lastSources.map((s) => [s.id, s.type]), [["history:p2", "history"], ["history:p1", "history"]], "exactly the chosen posts, in order");
+  assert.deepEqual(res.body.postsAssessed.map((p: any) => p.postId), ["p2", "p1"]);
+  assert.equal(res.body.findings.length, 1);
+  assert.equal(res.body.findings[0].crossSource, true);
+  assert.equal(res.body.mode, "databricks");
+
+  // The AI conclusion is kept with the posts it came from, and deleted with them.
+  await waitForSaves();
+  assert.equal((await store.listInterpretations(ALICE)).length, 1);
+  await call("DELETE", "/api/history/posts/p1", ALICE);
+  assert.equal((await store.listInterpretations(ALICE)).length, 0);
+});
+
+test("assess: refuses other users' posts, unknown ids, duplicates, too many, and a missing user id", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([post("a1", "Alice at Maple Street")]));
+  await call("POST", "/api/history/import", BOB, importBody([post("b1", "Bob at the lake")]));
+
+  const stolen = await call("POST", "/api/history/assess", BOB, assessBody(["b1", "a1"]));
+  assert.equal(stolen.status, 400);
+  assert.match(stolen.body.error.message, /not in your saved history/);
+  assert.deepEqual(lastSources, [], "nothing was analyzed");
+
+  assert.equal((await call("POST", "/api/history/assess", BOB, assessBody([]))).status, 400);
+  assert.equal((await call("POST", "/api/history/assess", BOB, assessBody(["b1", "b1"]))).status, 400);
+  const many = Array.from({ length: 21 }, (_, i) => `x${i}`);
+  assert.match((await call("POST", "/api/history/assess", BOB, assessBody(many))).body.error.message, /at most 20/);
+  assert.equal((await call("POST", "/api/history/assess", null, assessBody(["b1"]))).status, 400);
+  assert.equal((await call("POST", "/api/history/assess", BOB, { ...assessBody(["b1"]), sources: [] })).status, 400, "no extra fields");
 });

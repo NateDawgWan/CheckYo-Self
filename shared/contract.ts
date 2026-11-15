@@ -255,6 +255,7 @@ export interface HealthResponse {
 //   POST   /api/history/import                       HistoryImportRequest -> HistoryImportResponse
 //   GET    /api/history                              -> HistoryListResponse
 //   POST   /api/history/suggest                      HistorySuggestRequest -> HistorySuggestResponse
+//   POST   /api/history/assess                       HistoryAssessRequest -> HistoryAssessResponse
 //   DELETE /api/history/posts/:postId                -> HistoryDeleteResponse
 //   POST   /api/history/approvals/:approvalId/revoke -> HistoryDeleteResponse
 //   DELETE /api/history                              -> HistoryDeleteResponse  ("delete all my history")
@@ -268,7 +269,38 @@ export const HISTORY_LIMITS = {
   maxCharsPerPost: 5000,
   /** At most this many earlier posts are added to one analysis. */
   maxPostsPerAnalysis: 8,
+  /** At most this many saved posts are assessed together (POST /api/history/assess). */
+  maxPostsPerAssessment: 20,
 } as const;
+
+/**
+ * POST /api/history/assess: what the user's SAVED posts reveal TOGETHER, with
+ * no new draft (e.g. a first name in one post and a school in another).
+ * `postIds` are exactly the saved posts the user chose (1 to
+ * HISTORY_LIMITS.maxPostsPerAssessment); unknown ids are refused.
+ */
+export interface HistoryAssessRequest {
+  contractVersion: typeof CONTRACT_VERSION;
+  postIds: string[];
+}
+
+/**
+ * Same meaning as AnalyzeResponse's fields. Evidence sourceIds are
+ * "history:<postId>"; `crossSource` findings combine several posts.
+ */
+export interface HistoryAssessResponse {
+  contractVersion: typeof CONTRACT_VERSION;
+  requestId: string;
+  mode: AnalysisMode;
+  model: string | null;
+  promptVersion: string | null;
+  analyzedAt: string;
+  summary: string;
+  findings: Finding[];
+  droppedFindings: number;
+  /** The posts that were assessed, in the order sent. */
+  postsAssessed: Array<{ sourceId: string; postId: string; publishedAt: string }>;
+}
 
 /**
  * OBSERVED data: one earlier post, as the user approved it.

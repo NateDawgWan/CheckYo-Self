@@ -8,6 +8,8 @@ import {
   type AnalyzeRequest,
   type AnalyzeResponse,
   type ErrorResponse,
+  type HistoryAssessRequest,
+  type HistoryAssessResponse,
   type HistoryDeleteResponse,
   type HistoryImportRequest,
   type HistoryImportResponse,
@@ -82,6 +84,15 @@ export function analyzeWithHistory(sources: TextSource[], draftHash: string, his
   if (historyPostIds.length) body.historyPostIds = historyPostIds;
   if (usePortfolio) body.usePortfolio = true;
   return call("POST", "/api/analyze", body);
+}
+
+/**
+ * What these saved posts reveal TOGETHER (no draft). Sends only the post ids;
+ * the backend reads exactly those posts from this user's history.
+ */
+export function assessHistory(postIds: string[]): Promise<HistoryAssessResponse> {
+  const body: HistoryAssessRequest = { contractVersion: CONTRACT_VERSION, postIds };
+  return call("POST", "/api/history/assess", body);
 }
 
 /** Scans a few not-yet-scanned saved posts into the profile (live AI). Call again until remaining is 0. */

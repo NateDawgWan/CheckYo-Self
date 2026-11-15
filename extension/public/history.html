@@ -36,6 +36,34 @@
         <p id="saved-message" class="message" role="status" aria-live="polite"></p>
       </section>
 
+      <!-- 1b. What the saved posts reveal together (src/history-assess.ts) -->
+      <section class="hist-section" aria-labelledby="assess-heading">
+        <h2 id="assess-heading" class="section-title">What your posts reveal together</h2>
+        <p class="hint">
+          One post rarely gives much away. Several together can: a first name in one, a school in another, a pickup time in
+          a third. This reads your saved posts <em>together</em> and gives a risk score for what a stranger could piece together.
+        </p>
+        <p id="assess-scope" class="hint consent-note"></p>
+        <div class="hist-actions">
+          <button id="assess" type="button" class="primary small" disabled>Assess my saved posts</button>
+        </div>
+        <p id="assess-message" class="message" role="status" aria-live="polite"></p>
+        <div id="assess-result" class="assess-result" hidden>
+          <div id="assess-verdict" class="verdict">
+            <div class="verdict-score">
+              <span class="verdict-label">Risk score</span>
+              <span id="assess-score" class="verdict-number">0</span>
+              <span class="verdict-max">/ 100</span>
+            </div>
+            <span id="assess-stamp" class="verdict-stamp">LOW</span>
+            <p id="assess-headline" class="verdict-headline"></p>
+            <p id="assess-note" class="verdict-note"></p>
+          </div>
+          <p id="assess-summary" class="assess-summary"></p>
+          <ol id="assess-list" class="hist-list"></ol>
+        </div>
+      </section>
+
       <!-- 2. The profile: facts from all saved posts -->
       <section class="hist-section" aria-labelledby="profile-heading">
         <h2 id="profile-heading" class="section-title">Your profile</h2>

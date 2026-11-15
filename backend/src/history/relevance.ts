@@ -62,9 +62,13 @@ export interface HistorySelection {
  * Throws BAD_REQUEST, instead of quietly leaving posts out, if the choice
  * would break the request limits.
  */
-export function buildHistorySources(draft: TextSource[], chosen: StoredHistoryPost[]): HistorySelection {
-  if (chosen.length > HISTORY_LIMITS.maxPostsPerAnalysis) {
-    throw new AppError("BAD_REQUEST", 400, `Choose at most ${HISTORY_LIMITS.maxPostsPerAnalysis} earlier posts per check.`);
+export function buildHistorySources(
+  draft: TextSource[],
+  chosen: StoredHistoryPost[],
+  maxPosts: number = HISTORY_LIMITS.maxPostsPerAnalysis,
+): HistorySelection {
+  if (chosen.length > maxPosts) {
+    throw new AppError("BAD_REQUEST", 400, `Choose at most ${maxPosts} earlier posts per check.`);
   }
   if (draft.length + chosen.length > LIMITS.maxSources) {
     throw new AppError("BAD_REQUEST", 400, `Too many pieces of text (max ${LIMITS.maxSources}). Choose fewer earlier posts.`);
