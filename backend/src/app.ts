@@ -87,6 +87,30 @@ export function createApp(deps: AppDeps) {
 
   const userIdOf = (req: Request) => validateUserId(req.get(USER_ID_HEADER));
 
+  // AI interpretations still being saved, per user (saved after the analysis
+  // reply is sent). One user's saves run one after another. Deleting history
+  // first waits for that user's saves, so a slow save can never store an
+  // interpretation of a post the user already deleted.
+  const pendingSaves = new Map<string, Promise<void>>();
+
+  function saveInBackground(userId: string, interpretations: AiInterpretation[], requestId: string) {
+    const previous = pendingSaves.get(userId) ?? Promise.resolve();
+    const job: Promise<void> = previous
+      .then(() => deps.historyStore.saveInterpretations(userId, interpretations))
+      .catch((err) => {
+        // The user already has their results; just report that saving failed.
+        console.error(`[${requestId}] could not save ${interpretations.length} interpretation(s): ${(err as Error).message}`);
+      })
+      .then(() => {
+        if (pendingSaves.get(userId) === job) pendingSaves.delete(userId);
+      });
+    pendingSaves.set(userId, job);
+  }
+
+  const waitForSaves = (userId: string) => pendingSaves.get(userId) ?? Promise.resolve();
+  // For tests and shutdown: resolves when every background save has finished.
+  app.locals.waitForPendingSaves = () => Promise.all([...pendingSaves.values()]);
+
   // Wraps an async route so its errors reach the error handler below.
   const route =
     (handler: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) =>
@@ -139,24 +163,21 @@ export function createApp(deps: AppDeps) {
         historyUsed,
       };
 
-      // Keep AI conclusions about earlier posts SEPARATE from the posts themselves.
-      // Mock results are keyword rules, not AI, so they are never stored.
-      if (userId && deps.mode === "databricks") {
-        const interpretations = interpretationsFrom(body);
-        try {
-          await deps.historyStore.saveInterpretations(userId, interpretations);
-        } catch (err) {
-          // The analysis itself is fine; just report that saving failed.
-          console.error(`[${requestId}] could not save ${interpretations.length} interpretation(s): ${(err as Error).message}`);
-        }
-      }
-
       // Privacy: log ids and counts only — never the post text or the user id.
       console.log(
         `[${requestId}] mode=${deps.mode} sources=${sources.length} history=${historyUsed.length} ` +
           `findings=${body.findings.length} dropped=${body.droppedFindings} ${Date.now() - startedAt}ms`,
       );
       res.json(body);
+
+      // Keep AI conclusions about earlier posts SEPARATE from the posts themselves.
+      // Mock results are keyword rules, not AI, so they are never stored.
+      // Saved AFTER replying: the Databricks App's database is slow, and the
+      // user shouldn't wait for it. History deletes wait for these saves.
+      if (userId && deps.mode === "databricks") {
+        const interpretations = interpretationsFrom(body);
+        if (interpretations.length > 0) saveInBackground(userId, interpretations, requestId);
+      }
     }),
   );
 
@@ -212,7 +233,10 @@ export function createApp(deps: AppDeps) {
     "/api/history/posts/:postId",
     checkOrigin,
     route(async (req, res) => {
-      const counts = await deps.historyStore.deletePost(userIdOf(req), validatePostId(req.params.postId));
+      const userId = userIdOf(req);
+      const postId = validatePostId(req.params.postId);
+      await waitForSaves(userId);
+      const counts = await deps.historyStore.deletePost(userId, postId);
       if (counts.deletedPosts === 0) throw new AppError("NOT_FOUND", 404, "No such post in your history.");
       const body: HistoryDeleteResponse = { contractVersion: CONTRACT_VERSION, ...counts };
       res.json(body);
@@ -223,7 +247,10 @@ export function createApp(deps: AppDeps) {
     "/api/history/approvals/:approvalId/revoke",
     checkOrigin,
     route(async (req, res) => {
-      const counts = await deps.historyStore.revokeApproval(userIdOf(req), validateApprovalId(req.params.approvalId));
+      const userId = userIdOf(req);
+      const approvalId = validateApprovalId(req.params.approvalId);
+      await waitForSaves(userId);
+      const counts = await deps.historyStore.revokeApproval(userId, approvalId);
       if (!counts) throw new AppError("NOT_FOUND", 404, "No such approval in your history.");
       const body: HistoryDeleteResponse = { contractVersion: CONTRACT_VERSION, ...counts };
       res.json(body);
@@ -234,7 +261,9 @@ export function createApp(deps: AppDeps) {
     "/api/history",
     checkOrigin,
     route(async (req, res) => {
-      const counts = await deps.historyStore.deleteAll(userIdOf(req));
+      const userId = userIdOf(req);
+      await waitForSaves(userId);
+      const counts = await deps.historyStore.deleteAll(userId);
       const body: HistoryDeleteResponse = { contractVersion: CONTRACT_VERSION, ...counts };
       res.json(body);
     }),

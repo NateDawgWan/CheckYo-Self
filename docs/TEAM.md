@@ -108,7 +108,7 @@ POST   /api/analyze  { ..., historyPostIds: [...] } -> AnalyzeResponse with hist
 ## Not done yet (do not assume these work)
 
 - **Live Databricks analysis** passed with real credentials on 2026-11-14 (`npm run check:databricks` printed `Success. Connection verified.`). Re-run it after any app or credential change. Results go in `docs/TEST_RESULTS.md`.
-- **Databricks history storage** passed `npm run check:history` on 2026-11-14 (import, list, revoke). A live analysis with history (and saving its AI interpretations) also passed, but took about 43 s. Set `HISTORY_STORE=databricks-app` to use it; the default `dev-memory` is temporary.
+- **Databricks history storage** passed `npm run check:history` on 2026-11-14 (import, list, revoke). A live analysis with history (and saving its AI interpretations) also passed, and now takes about 8–9 s (interpretations are saved after the reply). Import and delete take about 10–12 s each. Set `HISTORY_STORE=databricks-app` to use it; the default `dev-memory` is temporary.
 - The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **the popup doesn't use it yet**.
 - Instagram integration and the extension's history screen are not implemented (only planned above).
 - The popup has only been checked through its code and automated tests, not by clicking through it in Chrome.

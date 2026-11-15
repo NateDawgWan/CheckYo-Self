@@ -24,6 +24,8 @@ let lastSources: TextSource[] = [];
 let store: DevMemoryHistoryStore;
 let baseUrl = "";
 let server: ReturnType<ReturnType<typeof createApp>["listen"]>;
+// Resolves when the AI interpretations saved after a reply are stored.
+let waitForSaves: () => Promise<unknown>;
 
 before(async () => {
   store = new DevMemoryHistoryStore();
@@ -40,6 +42,7 @@ before(async () => {
     },
     getDatabricksStatus: () => ({ state: "configured_unverified", lastCallAt: null, lastError: null }),
   } as AppDeps);
+  waitForSaves = app.locals.waitForPendingSaves;
   await new Promise<void>((resolve) => {
     server = app.listen(0, "127.0.0.1", resolve);
   });
@@ -187,6 +190,7 @@ test("revoking an approval deletes its posts and the AI interpretations derived 
   assert.equal(analysis.body.findings[0].crossSource, true);
   assert.ok(analysis.body.historyUsed.some((h: any) => h.postId === "p1"));
 
+  await waitForSaves(); // interpretations are saved after the reply
   const interpretations = await store.listInterpretations(ALICE);
   assert.equal(interpretations.length, 1);
   assert.deepEqual(interpretations[0].postIds, ["p1"]);
@@ -302,4 +306,88 @@ test("health reports the history store and contract version", async () => {
   const res = await call("GET", "/api/health", null);
   assert.equal(res.body.contractVersion, CONTRACT_VERSION);
   assert.deepEqual(res.body.history, { store: "dev-memory" });
+});
+
+// --- Saving AI interpretations after the reply --------------------------------
+
+/** An analyzer whose one finding quotes earlier post p1. */
+function findingFromP1(): AppDeps["analyze"] {
+  return async (sources) =>
+    parseModelOutput(
+      JSON.stringify({
+        summary: "s",
+        findings: [
+          {
+            category: "children",
+            severity: "high",
+            exposure: "Names a school.",
+            evidence: [{ sourceId: "history:p1", quote: "Lincoln Elementary" }],
+            confidence: "medium",
+            uncertainty: "",
+            suggestedEdits: [],
+          },
+        ],
+      }),
+      sources,
+    );
+}
+
+/** Makes the store's saveInterpretations wait until release() is called. */
+function holdSaves() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const realSave = store.saveInterpretations.bind(store);
+  let started = 0;
+  store.saveInterpretations = async (userId, items) => {
+    started++;
+    await gate;
+    return realSave(userId, items);
+  };
+  return { release, started: () => started };
+}
+
+test("analysis replies without waiting for interpretations to be saved", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "Lincoln Elementary pickup")]));
+  analyzer = findingFromP1();
+  const saves = holdSaves();
+
+  // The save is stuck, yet the user still gets their results.
+  const analysis = await call("POST", "/api/analyze", ALICE, analyzeBody("At school", ["p1"]));
+  assert.equal(analysis.status, 200);
+  assert.equal(analysis.body.findings.length, 1);
+  assert.equal(saves.started(), 1);
+  assert.equal((await store.listInterpretations(ALICE)).length, 0);
+
+  saves.release();
+  await waitForSaves();
+  assert.equal((await store.listInterpretations(ALICE)).length, 1);
+});
+
+test("deleting history waits for a pending save, so no interpretation of a deleted post is left behind", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "Lincoln Elementary pickup")]));
+  analyzer = findingFromP1();
+  const saves = holdSaves();
+  assert.equal((await call("POST", "/api/analyze", ALICE, analyzeBody("At school", ["p1"]))).status, 200);
+
+  // Delete while the save is still running; release the save shortly after.
+  const deleting = call("DELETE", "/api/history", ALICE);
+  setTimeout(saves.release, 20);
+  const deleted = await deleting;
+  assert.equal(deleted.status, 200);
+  assert.deepEqual({ posts: deleted.body.deletedPosts, interpretations: deleted.body.deletedInterpretations }, { posts: 1, interpretations: 1 });
+  await waitForSaves();
+  assert.equal((await store.listInterpretations(ALICE)).length, 0);
+});
+
+test("a failed interpretation save does not affect the analysis reply", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "Lincoln Elementary pickup")]));
+  analyzer = findingFromP1();
+  store.saveInterpretations = async () => {
+    throw new AppError("UPSTREAM_ERROR", 502, "database down");
+  };
+  const analysis = await call("POST", "/api/analyze", ALICE, analyzeBody("At school", ["p1"]));
+  assert.equal(analysis.status, 200);
+  assert.equal(analysis.body.findings.length, 1);
+  await waitForSaves(); // the failure is logged, not thrown
+  assert.equal((await call("GET", "/api/history", ALICE)).body.posts.length, 1);
 });

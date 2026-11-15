@@ -9,7 +9,7 @@ Last updated: 2026-11-14, branch `Backend-Connection/History`.
 | Check | Result |
 |---|---|
 | `npm run typecheck` (backend, extension) | Pass |
-| `npm test` backend | 50/50 pass |
+| `npm test` backend | 53/53 pass |
 | `npm test` extension | 45/45 pass (includes the OCR module's tests from `main`) |
 | `npm run build` (extension) | Pass |
 
@@ -58,9 +58,10 @@ Manual mock-mode run (`ANALYSIS_MODE=mock`, `HISTORY_STORE=dev-memory`), using o
 | Live `/api/analyze` through the backend (`ANALYSIS_MODE=databricks`, one **synthetic** caption with a made-up address and travel dates) | **Pass.** 200 in about 6 s, `mode: databricks`, 2 findings (`location`, `travel_absence`), every quote `verified: true`, `droppedFindings: 0`, valid suggested edits. `/api/health` then showed `databricks.state: verified`. |
 | `check:history` against the app (`HISTORY_STORE=databricks-app` for that one run, deployment `01f1e0b30e7e1eabb94e4d52d7fef105`) | **Pass.** `Success. History storage verified (import, read, revoke, delete).` One synthetic post under a throwaway user id was imported, listed, revoked and confirmed gone. Not covered: the interpretations endpoints, and analysis with history through the live model. |
 | Full history path through the backend (`HISTORY_STORE=databricks-app`, live model, one **synthetic** past post about a school and classroom, then a synthetic draft) | **Pass.** Import 200 and listed back. `/api/analyze` with `historyPostIds: ["synth1"]` returned 3 findings, 0 dropped, with verified quotes from both `caption` and `history:synth1`, and `historyUsed` named the post with its date. `DELETE /api/history` then removed 1 post and **2 saved AI interpretations** (so interpretation saving works live), and the list was empty. **Slow:** 42.7 s for the analysis with history (history list about 2 s, analysis without history about 10 s; the rest is the longer prompt and saving interpretations, each app SQL statement is slow). Each Databricks call has its own 45 s limit, so none timed out. |
+| Same path after saving interpretations **after the reply** (backend change) | **Pass, faster.** Two analyses with history took **9.1 s and 8.0 s** (was 42.7 s), 3 and 2 findings, `historyUsed` correct. `DELETE /api/history` waited for the background saves, then removed 1 post and 3 interpretations; the list was empty. Still slow on the app side: import about 11 s, delete-all about 12 s (each app SQL statement is slow). |
 
 **Status:**
 
 - **Live analysis through the Databricks App: VERIFIED** (2026-11-14, OAuth M2M, `/api/v1/...` route). Re-run `npm run check:databricks` after any app or credential change.
-- **Databricks history persistence: import, list and revoke VERIFIED** (2026-11-14, `check:history`). Analysis with history and interpretation storage also passed through the backend against the live model. The local `.env` now uses `HISTORY_STORE=databricks-app`. Known issue: an analysis that uses history took about 43 s.
+- **Databricks history persistence: import, list and revoke VERIFIED** (2026-11-14, `check:history`). Analysis with history and interpretation storage also passed through the backend against the live model. The local `.env` now uses `HISTORY_STORE=databricks-app`. An analysis with history takes about 8–9 s now that interpretations are saved after the reply. History import and delete still take about 10–12 s each (app-side SQL).
 - **Known-good app deployment:** `01f1e0b30e7e1eabb94e4d52d7fef105` (source snapshot in `databricks-app/`). Roll back to it if a new deploy fails these checks.
