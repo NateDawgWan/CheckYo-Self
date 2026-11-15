@@ -1,5 +1,7 @@
 # Roadmap
 
+Who owns each milestone, and the planned interfaces between them, are in [TEAM.md](TEAM.md).
+
 ## Milestone 2: local OCR
 
 - Run OCR in the extension with Tesseract.js. Manifest V3 forbids remotely hosted code, so bundle its worker, WASM core and English language data inside the extension instead of loading them from a CDN.
