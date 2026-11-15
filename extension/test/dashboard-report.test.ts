@@ -7,6 +7,7 @@ import {
   buildReport,
   combineScores,
   findHighlights,
+  findingFloor,
   findingWeight,
   overviewText,
   postIdForSource,
@@ -184,4 +185,36 @@ test("photo advice lists only photo edits; routine advice ignores time-away find
   assert.deepEqual(photo.edits, ["Crop out the banner with the university name."]);
   const routine = report.recommendations.find((r) => r.key === "routine")!;
   assert.ok(!routine.postIds.includes("post-4"), "weekend-away post belongs to 'delay', not 'routine'");
+});
+
+// --- one serious finding sets a minimum (risk score update) ---------------------------
+
+test("the worst single finding sets a minimum score, in the dashboard too", () => {
+  const ssn = finding({ category: "identity", severity: "high", confidence: "high" });
+  const report = buildReport([post("p1", [ssn])]);
+  assert.ok(report.score >= 75, `score was ${report.score}`);
+  assert.equal(report.level, "critical");
+  assert.ok(postScore(report, "p1") >= 75, "the post's own score uses the same rule");
+});
+
+test("minimums: sensitive high 75, high 50, sensitive medium 50, medium 25, low 0; halved when unsure", () => {
+  assert.equal(findingFloor(finding({ category: "identity", severity: "high" })), 75);
+  assert.equal(findingFloor(finding({ category: "location", severity: "high" })), 50);
+  assert.equal(findingFloor(finding({ category: "financial", severity: "medium" })), 50);
+  assert.equal(findingFloor(finding({ category: "location", severity: "medium" })), 25);
+  assert.equal(findingFloor(finding({ category: "health", severity: "low" })), 0);
+  assert.equal(findingFloor(finding({ category: "identity", severity: "high", confidence: "low" })), 38);
+});
+
+test("sensitive categories weigh more than everyday ones at the same severity", () => {
+  const everyday = findingWeight(finding({ category: "location", severity: "high" }), false);
+  const sensitive = findingWeight(finding({ category: "identity", severity: "high" }), false);
+  assert.ok(sensitive > everyday);
+});
+
+test("many small findings still add up past the minimum (the formula is unchanged)", () => {
+  const lows = Array.from({ length: 6 }, (_, i) => finding({ id: `f${i}`, category: "location", severity: "medium" }));
+  const report = buildReport([post("p1", lows)]);
+  assert.ok(report.score > 25, `score was ${report.score}`);
+  assert.equal(report.score, combineScores(lows.map((f) => findingWeight(f, false))));
 });
