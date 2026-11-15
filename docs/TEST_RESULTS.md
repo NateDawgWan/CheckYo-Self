@@ -51,7 +51,7 @@ Manual mock-mode run (`ANALYSIS_MODE=mock`, `HISTORY_STORE=dev-memory`), using o
 | Unauthenticated probes of the app | `/` and `/serving-endpoints/...` redirect to the browser login (302). `/api/health` answers 401. |
 | `check:databricks`, PAT mode, **fake** token, handoff path | Correctly failed: app answered HTTP 401, reported as `UPSTREAM_AUTH` with the OAuth hint. |
 | `check:databricks`, OAuth mode, **fake** client, real workspace | Correctly failed: workspace `/oidc/v1/token` exists and answered 401, reported with the settings to check. |
-| `check:databricks` with **real** credentials | **Not run.** No credentials available. |
+| `check:databricks` with **real** credentials (service principal `secondlook-backend`, OAuth M2M, `/api/v1/...` route) | **Failed at the app's access gate.** The workspace issued a valid token (scope `all-apis`, workspace audience, correct client ID). The app then answered **HTTP 401 with an empty `{}` body on every route**, including `/` and `/api/health`, with or without a fresh token. Empty-body 401s come from the Databricks gate, not the app's code, so the request never reached Genie's relay. Most likely cause: the service principal lacks **Can Use** on the app. |
 | `check:history` against the app | **Not run.** The app has no history endpoints yet. |
 
 **Status:**
