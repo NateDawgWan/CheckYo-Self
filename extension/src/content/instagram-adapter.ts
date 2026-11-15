@@ -244,8 +244,9 @@ export function shareButtonFromEvent(event: Event): HTMLElement | null {
 
 /**
  * Gets the selected photo as a Blob, for local OCR. Returns null if the page
- * doesn't let us read it. The Blob is NEVER sent anywhere: it is only passed
- * to the OCR module running in this tab.
+ * doesn't let us read it. The photo is NEVER uploaded: it is only passed,
+ * inside the browser, to the extension's offscreen OCR page
+ * (content/offscreen-ocr.ts -> ocr-relay.ts -> offscreen.ts).
  */
 export async function readImageBlob(image: PreviewImage): Promise<Blob | null> {
   try {
