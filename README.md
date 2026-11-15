@@ -8,7 +8,7 @@ A Chrome extension that shows what an Instagram post could reveal about you befo
 
 - Node.js 20 or newer (`node -v`)
 - Google Chrome
-- For real AI results: a Databricks workspace with a chat model serving endpoint and a personal access token. Without these, the backend runs in **practice (mock) mode**.
+- For real AI results: access to our Databricks App (a service principal with CAN USE). Without it, the backend runs in **practice (mock) mode**.
 
 ## Setup
 
@@ -41,23 +41,32 @@ Tip: the popup closes when you click elsewhere. While developing, open it in a n
 
 `ANALYSIS_MODE=mock` (the default) returns findings from simple keyword rules in `backend/src/mock.ts`. **These are not AI results.** The popup shows a "Practice mode" label and a purple banner whenever results are mocked.
 
-To turn on real analysis:
+Real analysis goes through our Databricks App (`instagram-risk-analyzer`), which relays to a hosted model. Genie maintains the app; the backend only needs settings in `backend/.env` (see `backend/.env.example`):
 
-1. In Databricks, open the **Serving** page and copy the name of a chat model endpoint (for example a Foundation Model API endpoint; names and availability vary by workspace and region, so use whatever your workspace lists).
-2. Create a personal access token in your Databricks user settings (Developer section).
-3. Edit `backend/.env`:
+1. Get a **service principal** with **CAN USE** on the app, and its client ID and secret (ask the app owner; the secret must be shared privately, never in GitHub or chat).
+2. Edit `backend/.env`:
    ```
    ANALYSIS_MODE=databricks
-   DATABRICKS_HOST=https://<your-workspace>.cloud.databricks.com
-   DATABRICKS_TOKEN=<your token>
-   DATABRICKS_SERVING_ENDPOINT=<endpoint name>
+   DATABRICKS_HOST=https://instagram-risk-analyzer-7474656363418981.aws.databricksapps.com
+   DATABRICKS_SERVING_ENDPOINT=gpt-oss-120b
+   DATABRICKS_AUTH_TYPE=oauth-m2m
+   DATABRICKS_WORKSPACE_HOST=https://dbc-d050c3b5-83dc.cloud.databricks.com
+   DATABRICKS_CLIENT_ID=<client id>
+   DATABRICKS_CLIENT_SECRET=<secret>
    ```
-4. Test the connection: `npm run check:databricks` (in `backend/`). It should print `Success. Connection verified.`
-5. Restart `npm run dev`. The popup's label shows **"Databricks not tested yet"** until the first check succeeds, then **"Databricks connected"**. If a call fails it shows **"Databricks error"** (hover for the reason). Filled-in settings alone are never shown as connected.
+   The backend gets short-lived OAuth tokens and renews them itself.
+3. Test the connection: `npm run check:databricks` (in `backend/`). It should print `Success. Connection verified.`
+4. Restart `npm run dev`. The popup shows **"Databricks not tested yet"** until the first call succeeds, then **"Databricks connected"**. If a call fails it shows **"Databricks error"** (hover for the reason). Filled-in settings alone are never shown as connected. A failed call is shown as an error, never replaced with practice results.
 
-**Status:** the Databricks code has not yet been tested against a real workspace. Until someone completes step 4 successfully, treat it as unverified.
+**Status: unverified.** No live credentialed call has succeeded yet. The app currently redirects token calls outside `/api/` to a browser login, so it likely needs the `/api/` route requested in [docs/DATABRICKS_APP_API.md](docs/DATABRICKS_APP_API.md) (then set `DATABRICKS_INVOCATIONS_PATH`). A personal access token (`DATABRICKS_AUTH_TYPE=pat`) is also supported, but Databricks documents OAuth for calling apps. Results so far: [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
 
-If `check:databricks` fails: HTTP 401/403 means a bad or expired token; 404 means the host or endpoint name is wrong.
+If `check:databricks` fails: an OAuth token error means the workspace host, client ID or secret is wrong; an "auth" error from the app (401/403, or a redirect to the browser login) means the token isn't accepted for the app or the route isn't under `/api/`; 404 means the host, endpoint name or path is wrong.
+
+### Earlier posts (history)
+
+The backend can compare a draft with earlier posts the user **explicitly approved** (`includeHistory: true` on `/api/analyze`, plus the `X-Second-Look-User` header). Only published posts can be imported, users never see each other's history, and approvals can be revoked (deleting those posts and anything the AI derived from them). Routes are listed in `shared/contract.ts`.
+
+Storage today is **temporary and in memory** (`HISTORY_STORE=dev-memory`): not Databricks, and cleared on restart. Databricks storage (`HISTORY_STORE=databricks-app`) waits on the app endpoints in [docs/DATABRICKS_APP_API.md](docs/DATABRICKS_APP_API.md); verify it with `npm run check:history`. The popup has no history screen yet.
 
 ## Keeping secrets safe
 
@@ -84,7 +93,8 @@ The backend logs request IDs and counts, not post text.
 | backend | `npm run dev` | Run the server, restart on save |
 | backend | `npm run typecheck` | Check types without running |
 | backend | `npm test` | Run the regression tests |
-| backend | `npm run check:databricks` | Test Databricks credentials |
+| backend | `npm run check:databricks` | Live test of the Databricks connection |
+| backend | `npm run check:history` | Live test of Databricks history storage |
 | extension | `npm run build` | Build into `extension/dist` |
 | extension | `npm run watch` | Rebuild on save |
 | extension | `npm run typecheck` | Check types (source and tests) |

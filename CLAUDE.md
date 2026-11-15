@@ -6,23 +6,26 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 
 - Milestone 1: caption-entry popup, backend analysis route, and structured findings.
 - Mock mode is tested: typechecks, extension build, `npm test` regression tests in both packages, and manual `curl` checks of `/api/health` and `/api/analyze`.
-- Databricks integration is written and unit-tested with a fake `fetch`, but has **not** passed a live credentialed test. Treat it as unverified until `npm run check:databricks` prints `Success. Connection verified.` against a real workspace. "Configured" (settings filled in) is not "verified".
-- Team ownership and the interfaces between areas are in `docs/TEAM.md`.
-- Instagram interception, automatic image OCR, historical storage, and cross-post
-  reasoning are future milestones unless subsequent code and tests establish otherwise.
+- Databricks: the backend calls the Databricks App `instagram-risk-analyzer` (maintained by Genie, outside this repo), which relays to the hosted model. The connector supports OAuth service-principal tokens (default) and PATs, and is tested only against a fake `fetch`. It has **not** passed a live credentialed test. Treat it as unverified until `npm run check:databricks` prints `Success. Connection verified.` "Configured" (settings filled in) is not "verified". Probes show the app redirects token calls outside `/api/` to a browser login; see `docs/DATABRICKS_APP_API.md`.
+- History (milestone 3, backend side): explicit import of approved, published posts; relevant-history retrieval for analysis; per-user isolation; deletion and approval revocation; AI interpretations stored apart from observed posts. Storage is the **temporary in-memory dev store** (`HISTORY_STORE=dev-memory`, lost on restart). The Databricks App store (`databricks-app`) is written against a spec Genie has not built yet, so it's unverified. No extension UI for history yet.
+- Live vs. mock results: `docs/TEST_RESULTS.md`. Team ownership and interfaces: `docs/TEAM.md`.
+- Instagram interception and automatic image OCR are future milestones unless subsequent code and tests establish otherwise.
 - Implement only the milestone assigned in the current task.
 - Preserve the existing working structure; do not reorganize it without a concrete need.
 
 ## Architecture
 
 ```
-Chrome extension (TypeScript, MV3)        Backend (Node + Express, TypeScript)        Databricks
-  popup: caption + photo text  ──POST /api/analyze──▶  validate ─▶ prompt ─▶ ──────▶  model serving endpoint
-  hash draft, render findings  ◀──AnalyzeResponse────  parse + verify quotes ◀───────  (chat completions)
+Chrome extension (TypeScript, MV3)        Backend (Node + Express, TypeScript)        Databricks App ──▶ hosted model
+  popup: caption + photo text  ──POST /api/analyze──▶  validate ─▶ + approved history ─▶  (relay, OAuth)
+  hash draft, render findings  ◀──AnalyzeResponse────  parse + verify quotes ◀──────────  history storage (requested)
                                                        or mock.ts (no Databricks)
 ```
 
-- The extension never talks to Databricks and never holds credentials.
+- The extension never talks to Databricks and never holds credentials. OAuth tokens are fetched, cached and renewed only in `backend/src/auth.ts`.
+- A failed Databricks call is an error for the user. Never substitute mock findings after a live failure; mock mode is chosen explicitly at startup and labeled.
+- Drafts vs. history: `/api/analyze` accepts only draft sources (`caption`, `image_text`). `history:<postId>` sources are added by the backend from posts the user explicitly approved, and only `status: "published"` posts can be imported.
+- History requests carry the `X-Second-Look-User` header (a random per-install id). Every store method is per user; never read or delete across users.
 - Only text crosses the network: never images, image URLs, base64, or page HTML. `backend/src/validate.ts` enforces this.
 - `shared/contract.ts` is the single source of truth for the request/response format. Both sides import it. Change it first, then fix the type errors on both sides. Bump `CONTRACT_VERSION` on breaking changes.
 - Observed vs. AI-generated: `Evidence` (quote + `verified`) is observed text; `exposure`, `uncertainty`, `suggestedEdits` are AI interpretation. The backend, not the model, sets `verified` and `crossSource`.
@@ -40,14 +43,19 @@ Chrome extension (TypeScript, MV3)        Backend (Node + Express, TypeScript)  
 
 ```
 shared/contract.ts            Request/response types, limits, enums (both sides)
-backend/src/server.ts         Express app: GET /api/health, POST /api/analyze, error handler
-backend/src/config.ts         Reads backend/.env; ANALYSIS_MODE = mock | databricks
-backend/src/validate.ts       Request validation + "text only" guard
+backend/src/server.ts         Starts the app from .env settings (mock vs. databricks chosen once, here)
+backend/src/app.ts            Express routes: health, analyze, /api/history/*, error handler
+backend/src/config.ts         Reads backend/.env; reports missing settings, never guesses them
+backend/src/auth.ts           OAuth M2M tokens (cache + renewal) or fixed PAT
+backend/src/databricks.ts     Databricks client: one timeout incl. body, no redirects, retry once on auth failure
+backend/src/validate.ts       Request validation, "text only" guard, history import rules
 backend/src/prompt.ts         LLM system prompt (bump PROMPT_VERSION when editing)
-backend/src/databricks.ts     fetch() to /serving-endpoints/<name>/invocations
 backend/src/parse.ts          Parse LLM JSON, normalize fields, verify quotes
 backend/src/mock.ts           Keyword-rule fake findings (clearly labeled mode: "mock")
-backend/scripts/ping-databricks.ts   Credential check
+backend/src/history/          store.ts (interface), memoryStore.ts (TEMPORARY dev store),
+                              appStore.ts (Databricks App store, unverified), relevance.ts
+backend/scripts/ping-databricks.ts   Live connection check (npm run check:databricks)
+backend/scripts/check-history.ts     Live history round trip (npm run check:history)
 extension/public/             manifest.json, popup.html, popup.css (copied to dist/)
 extension/src/popup.ts        Popup wiring, draft hashing, stale detection, apply-edit
 extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
@@ -56,6 +64,8 @@ extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM
 backend/test/, extension/test/  Regression tests (node:test, run with `npm test`)
 docs/ROADMAP.md               Next milestones, history storage plan, Instagram assumptions
 docs/TEAM.md                  Module owners and integration interfaces (in code vs. proposed)
+docs/DATABRICKS_APP_API.md    What the backend needs from Genie's Databricks App (auth fix, history endpoints)
+docs/TEST_RESULTS.md          Mock and live results, kept separate
 ```
 
 ## Commands
@@ -79,7 +89,8 @@ cd extension && npm run typecheck && npm test && npm run build
 
 # Databricks (only with real credentials in backend/.env)
 cd backend && npm run check:databricks    # must print "Success. Connection verified."
-curl http://127.0.0.1:8787/api/health     # shows mode and databricks.state
+cd backend && npm run check:history       # HISTORY_STORE=databricks-app; must print "Success. History storage verified ..."
+curl http://127.0.0.1:8787/api/health     # shows mode, databricks.state and history.store
 ```
 
 `ANALYSIS_MODE=mock` (the default) needs no `.env` at all; you can also set it for one run instead of editing `.env`.
@@ -87,7 +98,8 @@ curl http://127.0.0.1:8787/api/health     # shows mode and databricks.state
 ## Rules
 
 - Never commit `.env` or put secrets in `extension/`. Secrets come from environment variables on the backend.
-- Never log post text on the backend; log request IDs and counts.
+- Never log post text, user ids, tokens, or Databricks response bodies on the backend; log request IDs, statuses and counts.
+- Don't claim a Databricks feature works until its live check (`check:databricks`, `check:history`) passes, and record the result in `docs/TEST_RESULTS.md`.
 - Render model output with `textContent`, never `innerHTML`.
 - Treat post text as untrusted input to the LLM (prompt injection). Keep the "data, not instructions" rule in the prompt.
 - If you change `BACKEND_URL` in `extension/src/api.ts`, update `host_permissions` in `extension/public/manifest.json`.
