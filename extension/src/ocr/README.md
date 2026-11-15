@@ -14,7 +14,7 @@ Reads the text in a photo **on the user's computer** with [Tesseract.js](https:/
 | File | What it does | Runs in |
 |---|---|---|
 | `index.ts` | Public interface. Import from `./ocr`, not the files inside. | |
-| `engine.ts` | `readImageText()`: decodes the image (applies EXIF rotation), runs Tesseract (automatic page layout, then zoomed crops of small text), handles progress, cancel, timeouts and errors. | browser only |
+| `engine.ts` | `readImageText()`: decodes the image (applies EXIF rotation), runs Tesseract twice on the whole photo (SINGLE_BLOCK and automatic page layout, merged by scene.ts: each wins on different photos), then zoomed crops of small text, handles progress, cancel, timeouts and errors. | browser only |
 | `convert.ts` | Tesseract output → `OcrResult` (words, lines, boxes, ids). `toTextSource()`. | anywhere (tested) |
 | `scene.ts` | Text in everyday photos: keeps only clearly readable lines (drops brickwork/window junk), picks small text to zoom into, merges the reads. | anywhere (tested) |
 | `review.ts` | Review/correct step, `reviewHint()`, `locateQuote()` (quote → boxes). | anywhere (tested) |
