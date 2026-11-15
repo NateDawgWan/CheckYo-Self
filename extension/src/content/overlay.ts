@@ -12,6 +12,7 @@ import type { AnalyzeResponse, TextSource } from "../../../shared/contract";
 import { PHOTO_TEXT_MAX_CHARS } from "../photo-text";
 import type { MessageKind, PhotoNotice, WarningPanel, WarningPanelActions } from "../ports";
 import { renderResults, type ResultElements } from "../render";
+import { renderVerdict, type VerdictElements } from "../verdict";
 // The popup's stylesheet, bundled as text by esbuild (see build.mjs).
 import popupCss from "../../public/popup.css";
 
@@ -135,7 +136,31 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const markedDraft = el("div", "marked-draft");
   const findings = el("ol", "findings");
   const meta = el("p", "meta");
-  results.append(el("h2", undefined, "What this post could reveal"), mockBanner, incompleteBanner, staleBanner, summary, markedDraft, findings, meta);
+
+  // The verdict (risk score, LOW/MEDIUM/HIGH stamp, headline) and the advice
+  // cards: the same structure and classes as popup.html, drawn by the same
+  // renderVerdict() (src/verdict.ts, display only).
+  const verdict = el("div", "verdict");
+  verdict.hidden = true;
+  const verdictScoreBox = el("div", "verdict-score");
+  const verdictScore = el("span", "verdict-number", "0");
+  verdictScoreBox.append(el("span", "verdict-label", "Risk score"), verdictScore, el("span", "verdict-max", "/ 100"));
+  const verdictStamp = el("span", "verdict-stamp", "LOW");
+  const verdictHeadline = el("p", "verdict-headline");
+  const verdictNote = el("p", "verdict-note");
+  verdict.append(verdictScoreBox, verdictStamp, verdictHeadline, verdictNote);
+  const advice = el("section", "advice");
+  advice.hidden = true;
+  const adviceList = el("ol", "advice-list");
+  advice.append(el("h3", "advice-title", "Before you drop that post…"), adviceList);
+  const verdictEls: VerdictElements = {
+    root: verdict, score: verdictScore, stamp: verdictStamp, headline: verdictHeadline, note: verdictNote, advice, adviceList,
+  };
+
+  results.append(
+    el("h2", "results-title", "What this post could reveal"),
+    verdict, mockBanner, incompleteBanner, staleBanner, summary, markedDraft, findings, advice, meta,
+  );
 
   const resultEls: ResultElements = { root: results, summary, markedDraft, findings, meta, mockBanner, incompleteBanner };
 
@@ -196,6 +221,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       // Apply buttons call back into main.ts, which re-checks the edit
       // against the caption that is on the page at that moment.
       renderResults(resultEls, result, sources, (edit) => actions.onApplyEdit(edit));
+      renderVerdict(verdictEls, result, sources); // score + stamp + advice, same as the popup
       hasResult = true;
       updateContinueLabel();
     },
