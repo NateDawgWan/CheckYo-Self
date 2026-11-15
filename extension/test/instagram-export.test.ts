@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HISTORY_LIMITS, USER_ID_PATTERN } from "../../shared/contract";
-import { findPostFiles, fixExportText, joinPhotoTexts, parsePostFiles } from "../src/instagram-export";
+import { findPostFiles, fixExportText, joinPhotoTexts, parsePostFiles, resolvePhotoPath } from "../src/instagram-export";
 import { isValidUserId, newUserId } from "../src/user-id";
 
 // Instagram writes "I’m at the café" as UTF-8 bytes, one per character:
@@ -37,6 +37,29 @@ test("finds post files in both known export layouts, and nothing else", () => {
     "instagram-me-2026/personal_information/personal_information.json",
   ]);
   assert.deepEqual(files, ["instagram-me-2026/content/posts_2.json", "instagram-me-2026/your_instagram_activity/content/posts_1.json"]);
+});
+
+test("finds posts_1.json in a media folder too (a real 2026 export), but not posts.json or similar names", () => {
+  const files = findPostFiles([
+    "Instagram_folder/media/posts_1.json",
+    "Instagram_folder/media/posts.json",          // different, label-based format
+    "Instagram_folder/media/archived_posts_1.json",
+    "Instagram_folder/posts/17963947307997283.jpg",
+  ]);
+  assert.deepEqual(files, ["Instagram_folder/media/posts_1.json"]);
+});
+
+test("photo files are found even when the folder layout differs from the uri in the JSON", () => {
+  const chosen = ["media/posts_1.json", "posts/17963947307997283.jpg", "posts/18112292417363585.jpg"];
+  // The JSON says media/posts/<id>.jpg; the photo is at posts/<id>.jpg.
+  assert.equal(resolvePhotoPath("media/posts/17963947307997283.jpg", chosen), "posts/17963947307997283.jpg");
+  // Exact path wins.
+  assert.equal(resolvePhotoPath("media/posts/202403/111.jpg", ["media/posts/202403/111.jpg", "other/111.jpg"]), "media/posts/202403/111.jpg");
+  // Export picked one level too high: the uri is inside a subfolder.
+  assert.equal(resolvePhotoPath("media/posts/a.jpg", ["instagram-me/media/posts/a.jpg"]), "instagram-me/media/posts/a.jpg");
+  // Missing, or two files with the same name and no better match: not guessed.
+  assert.equal(resolvePhotoPath("media/posts/nope.jpg", chosen), undefined);
+  assert.equal(resolvePhotoPath("media/posts/x.jpg", ["a/x.jpg", "b/x.jpg"]), undefined);
 });
 
 test("fixes Instagram's byte-by-byte UTF-8, and leaves normal text alone", () => {

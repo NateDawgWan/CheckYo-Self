@@ -7,7 +7,7 @@
 import { HISTORY_LIMITS, type HistoryPost, type StoredHistoryPost } from "../../shared/contract";
 import { checkHealth, describeBackendStatus } from "./api";
 import { deleteAllHistory, deleteHistoryPost, getPortfolio, importHistory, listHistory, scanPortfolio } from "./history-api";
-import { findPostFiles, joinPhotoTexts, parsePostFiles, type ExportPost } from "./instagram-export";
+import { findPostFiles, joinPhotoTexts, parsePostFiles, resolvePhotoPath, type ExportPost } from "./instagram-export";
 import { OcrError, readImageText } from "./ocr";
 import { describePhotoRead } from "./photo-text";
 
@@ -189,13 +189,19 @@ function withoutRoot(path: string): string {
   return parts.slice(1).join("/");
 }
 
+/** The chosen file for a photo "uri" from the JSON (exports are laid out differently: resolvePhotoPath). */
+function photoFile(uri: string): File | undefined {
+  const path = resolvePhotoPath(uri, [...photoFiles.keys()]);
+  return path === undefined ? undefined : photoFiles.get(path);
+}
+
 async function readExportFolder(files: FileList) {
   const all = [...files];
   const byPath = new Map(all.map((f) => [f.webkitRelativePath.replaceAll("\\", "/"), f]));
   const postFiles = findPostFiles([...byPath.keys()]);
   if (postFiles.length === 0) {
     picker.hidden = true;
-    setText(importStatus, "No posts found. Pick the UNZIPPED export folder (it contains content/posts_1.json, possibly inside your_instagram_activity).", "error");
+    setText(importStatus, "No posts found. Pick the UNZIPPED export folder: the one that contains posts_1.json (in a content or media folder, possibly inside your_instagram_activity).", "error");
     return;
   }
   const texts = await Promise.all(postFiles.map((p) => byPath.get(p)!.text()));
@@ -229,6 +235,8 @@ function renderPicker() {
       });
       const body = el("div");
       const media = [`${post.photos.length} photo${post.photos.length === 1 ? "" : "s"}`];
+      const missing = post.photos.filter((p) => !photoFile(p)).length;
+      if (missing) media.push(`${missing} not found in the folder (its text won't be read)`);
       if (post.hasVideo) media.push("video (not read)");
       if (savedIds.has(post.postId)) media.push("already saved; saving again replaces it");
       body.append(el("div", "hist-date", shortDate(post.publishedAt)), el("p", "hist-caption", post.caption), el("p", "hist-meta", media.join(" · ")));
@@ -248,8 +256,8 @@ function updateImportButton() {
 async function photoTextFor(post: ExportPost): Promise<string | undefined> {
   const texts: string[] = [];
   for (const [i, path] of post.photos.slice(0, MAX_PHOTOS_PER_POST).entries()) {
-    const file = photoFiles.get(path);
-    if (!file) continue; // photo not in the chosen folder
+    const file = photoFile(path);
+    if (!file) continue; // photo not in the chosen folder (shown in the list)
     try {
       const view = describePhotoRead(await readImageText(file, i + 1));
       if (view.text) texts.push(view.text);
