@@ -9,6 +9,9 @@
 // checks every field):
 //   <export folder>/your_instagram_activity/content/posts_1.json   (newer)
 //   <export folder>/content/posts_1.json                           (older)
+//   <export folder>/media/posts_1.json                             (seen 2026-11, photos in posts/)
+// Any posts_<N>.json in the chosen folder is read. (A "posts.json" in a
+// different, label-based format may sit next to it; it isn't read.)
 // posts_1.json is a list of posts:
 //   [{ "media": [{ "uri": "media/posts/202403/123.jpg", "creation_timestamp": 1710000000, "title": "caption" }],
 //      "title": "caption (posts with several photos)", "creation_timestamp": 1710000000 }]
@@ -30,7 +33,7 @@ export interface ExportPost {
   hasVideo: boolean;
 }
 
-const POSTS_FILE = /(^|\/)content\/posts_\d+\.json$/i;
+const POSTS_FILE = /(^|\/)posts_\d+\.json$/i;
 const PHOTO = /\.(jpe?g|png|webp|gif|heic)$/i;
 const VIDEO = /\.(mp4|mov|m4v|webm)$/i;
 
@@ -131,6 +134,28 @@ export function parsePostFiles(jsonTexts: string[]): { posts: ExportPost[]; skip
   });
   posts.reverse(); // newest first for the list the user picks from
   return { posts, skipped };
+}
+
+/**
+ * Finds the photo file for a "uri" from the JSON among the chosen files
+ * (paths relative to the chosen folder, with "/"). The uri is relative to the
+ * export root, but exports are laid out differently and people move folders:
+ * the JSON can say "media/posts/123.jpg" while the file is at "posts/123.jpg".
+ * So: the exact path, else a path that one ends with (or that ends with it),
+ * else the only file with that file name. Returns undefined if not found or
+ * ambiguous.
+ */
+export function resolvePhotoPath(uri: string, paths: string[]): string | undefined {
+  const want = uri.replaceAll("\\", "/").replace(/^\/+/, "");
+  if (!want) return undefined;
+  const norm = paths.map((p) => p.replaceAll("\\", "/"));
+  const exact = norm.find((p) => p === want);
+  if (exact !== undefined) return exact;
+  const nested = norm.filter((p) => p.endsWith(`/${want}`) || want.endsWith(`/${p}`));
+  if (nested.length === 1) return nested[0];
+  const name = want.slice(want.lastIndexOf("/") + 1).toLowerCase();
+  const sameName = norm.filter((p) => p.slice(p.lastIndexOf("/") + 1).toLowerCase() === name);
+  return sameName.length === 1 ? sameName[0] : undefined;
 }
 
 /** Joins the photo texts of one post into history's single imageText (max chars). */
