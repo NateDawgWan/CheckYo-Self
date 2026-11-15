@@ -107,8 +107,8 @@ POST   /api/analyze  { ..., historyPostIds: [...] } -> AnalyzeResponse with hist
 
 ## Not done yet (do not assume these work)
 
-- **Live Databricks analysis** passed with real credentials on 2026-11-14 (`npm run check:databricks` printed `Success. Connection verified.`). Re-run it after any app or credential change. **Databricks history storage** is still untested: the app has no history endpoints yet. Results go in `docs/TEST_RESULTS.md`.
-- **Databricks history storage** isn't built on the app side yet. The backend uses a temporary in-memory store; verify the real one with `npm run check:history`.
+- **Live Databricks analysis** passed with real credentials on 2026-11-14 (`npm run check:databricks` printed `Success. Connection verified.`). Re-run it after any app or credential change. Results go in `docs/TEST_RESULTS.md`.
+- **Databricks history storage** passed `npm run check:history` on 2026-11-14 (import, list, revoke). Saving AI interpretations there is not tested yet. Set `HISTORY_STORE=databricks-app` to use it; the default `dev-memory` is temporary.
 - The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **the popup doesn't use it yet**.
 - Instagram integration and the extension's history screen are not implemented (only planned above).
 - The popup has only been checked through its code and automated tests, not by clicking through it in Chrome.

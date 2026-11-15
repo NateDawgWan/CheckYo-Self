@@ -7,7 +7,7 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 - Milestone 1: caption-entry popup, backend analysis route, and structured findings.
 - Mock mode is tested: typechecks, extension build, `npm test` regression tests in both packages, and manual `curl` checks of `/api/health` and `/api/analyze`.
 - Databricks: the backend calls the Databricks App `instagram-risk-analyzer` (maintained by Genie, outside this repo), which relays to the hosted model. The connector supports OAuth service-principal tokens (default) and PATs. **Live analysis verified 2026-11-14** (OAuth M2M, `/api/v1/serving-endpoints/{endpoint}/invocations`): `npm run check:databricks` passed and a synthetic `/api/analyze` returned verified findings. Re-run the check after any app or credential change; only a passing check counts. Token calls must use `/api/` routes; the service principal needs Workspace access and Can Use on the app. See `docs/DATABRICKS_APP_API.md`.
-- History (milestone 3, backend side): explicit import of approved, published posts; relevance suggestions (`/api/history/suggest`) to pre-select posts on the consent step; analysis with exactly the user-chosen posts (`historyPostIds`); per-user isolation; deletion and approval revocation; AI interpretations stored apart from observed posts. Storage is the **temporary in-memory dev store** (`HISTORY_STORE=dev-memory`, lost on restart). The Databricks App store (`databricks-app`) is written against a spec Genie has not built yet, so it's unverified. No extension UI for history yet.
+- History (milestone 3, backend side): explicit import of approved, published posts; relevance suggestions (`/api/history/suggest`) to pre-select posts on the consent step; analysis with exactly the user-chosen posts (`historyPostIds`); per-user isolation; deletion and approval revocation; AI interpretations stored apart from observed posts. Storage: the **temporary in-memory dev store** (`HISTORY_STORE=dev-memory`, lost on restart) by default, or the Databricks App store (`databricks-app`), whose import/list/revoke passed `npm run check:history` on 2026-11-14 (interpretations endpoints not yet tested). The app's source snapshot is in `databricks-app/` (backup only; Genie deploys). No extension UI for history yet.
 - Milestone 2 (in progress): local OCR module in `extension/src/ocr/` (Tesseract.js, bundled; unit tests, `npm run check:ocr`, and a local test page). Not yet wired into the popup, and not yet run inside the loaded extension.
 - Live vs. mock results: `docs/TEST_RESULTS.md`. Team ownership and interfaces: `docs/TEAM.md`.
 - Instagram interception is a future milestone unless subsequent code and tests establish otherwise.
@@ -19,7 +19,7 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 ```
 Chrome extension (TypeScript, MV3)        Backend (Node + Express, TypeScript)        Databricks App ──▶ hosted model
   popup: caption + photo text  ──POST /api/analyze──▶  validate ─▶ + approved history ─▶  (relay, OAuth)
-  hash draft, render findings  ◀──AnalyzeResponse────  parse + verify quotes ◀──────────  history storage (requested)
+  hash draft, render findings  ◀──AnalyzeResponse────  parse + verify quotes ◀──────────  history storage           
                                                        or mock.ts (no Databricks)
 ```
 
@@ -63,6 +63,7 @@ extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
 extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
+databricks-app/               Snapshot of Genie's Databricks App (backup; deploys happen in Databricks)
 backend/test/, extension/test/  Regression tests (node:test, run with `npm test`)
 docs/ROADMAP.md               Next milestones, history storage plan, Instagram assumptions
 docs/TEAM.md                  Module owners and integration interfaces (in code vs. proposed)

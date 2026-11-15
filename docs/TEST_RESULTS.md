@@ -56,9 +56,10 @@ Manual mock-mode run (`ANALYSIS_MODE=mock`, `HISTORY_STORE=dev-memory`), using o
 | Same check after **Workspace access** was enabled | **Authentication works; the app's relay crashes.** The workspace now accepts the service principal (`scim/v2/Me` 200, entitlement `workspace-access`). App `GET /api/health` and `GET /` return 200 `{"status":"ok","model":"system.ai.gpt-oss-120b"}`. Both `POST /api/v1/serving-endpoints/gpt-oss-120b/invocations` (so the new route exists) and the old `/serving-endpoints/...` route return **HTTP 500, plain "Internal Server Error"**, an unhandled exception in the app. Needs Genie to check the app logs. |
 | Same check after Genie **recreated the app** (its old app service principal was unrecoverable; same URL, new app identity, JSON `{"detail"}` errors) | **Pass.** `npm run check:databricks` printed `Success. Connection verified. Model replied: OK`. Both relay routes return 200 with the model's reply; `/api/health` 200. |
 | Live `/api/analyze` through the backend (`ANALYSIS_MODE=databricks`, one **synthetic** caption with a made-up address and travel dates) | **Pass.** 200 in about 6 s, `mode: databricks`, 2 findings (`location`, `travel_absence`), every quote `verified: true`, `droppedFindings: 0`, valid suggested edits. `/api/health` then showed `databricks.state: verified`. |
-| `check:history` against the app | **Not run.** The app has no history endpoints yet. |
+| `check:history` against the app (`HISTORY_STORE=databricks-app` for that one run, deployment `01f1e0b30e7e1eabb94e4d52d7fef105`) | **Pass.** `Success. History storage verified (import, read, revoke, delete).` One synthetic post under a throwaway user id was imported, listed, revoked and confirmed gone. Not covered: the interpretations endpoints, and analysis with history through the live model. |
 
 **Status:**
 
 - **Live analysis through the Databricks App: VERIFIED** (2026-11-14, OAuth M2M, `/api/v1/...` route). Re-run `npm run check:databricks` after any app or credential change.
-- **Databricks history persistence: UNVERIFIED and not built on the app side.** Development uses the temporary in-memory store.
+- **Databricks history persistence: import, list and revoke VERIFIED** (2026-11-14, `check:history`). Interpretation storage and history-in-analysis against the live model are not yet tested. Local `.env` still uses `HISTORY_STORE=dev-memory` until the team switches.
+- **Known-good app deployment:** `01f1e0b30e7e1eabb94e4d52d7fef105` (source snapshot in `databricks-app/`). Roll back to it if a new deploy fails these checks.

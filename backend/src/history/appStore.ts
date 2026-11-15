@@ -1,9 +1,8 @@
 // History stored by the Databricks App. Selected with HISTORY_STORE=databricks-app.
 //
-// STATUS: UNVERIFIED. These endpoints are specified in docs/DATABRICKS_APP_API.md
-// for Genie to build in the app; they did not exist when this was written.
-// Tested only against a fake fetch. Do not claim Databricks persistence works
-// until a real import/list/delete round trip has succeeded.
+// STATUS: import, list and revoke passed a live round trip (npm run check:history,
+// 2026-11-14). The interpretations endpoints exist in the app (databricks-app/app.py)
+// but are tested only against a fake fetch. Spec: docs/DATABRICKS_APP_API.md.
 //
 // Design notes:
 //  - All routes are under /api/ (Databricks Apps only accept token calls there).
