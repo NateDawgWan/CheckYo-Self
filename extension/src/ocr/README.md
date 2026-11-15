@@ -14,8 +14,9 @@ Reads the text in a photo **on the user's computer** with [Tesseract.js](https:/
 | File | What it does | Runs in |
 |---|---|---|
 | `index.ts` | Public interface. Import from `./ocr`, not the files inside. | |
-| `engine.ts` | `readImageText()`: decodes the image (applies EXIF rotation), runs Tesseract, handles progress, cancel, timeouts and errors. | browser only |
+| `engine.ts` | `readImageText()`: decodes the image (applies EXIF rotation), runs Tesseract (automatic page layout, then zoomed crops of small text), handles progress, cancel, timeouts and errors. | browser only |
 | `convert.ts` | Tesseract output → `OcrResult` (words, lines, boxes, ids). `toTextSource()`. | anywhere (tested) |
+| `scene.ts` | Text in everyday photos: keeps only clearly readable lines (drops brickwork/window junk), picks small text to zoom into, merges the reads. | anywhere (tested) |
 | `review.ts` | Review/correct step, `reviewHint()`, `locateQuote()` (quote → boxes). | anywhere (tested) |
 | `coords.ts` | Image-pixel boxes → preview positions (`fill` / `contain` / `cover`). | anywhere (tested) |
 | `control.ts` | Cancel/timeout/progress helpers. | anywhere (tested) |
@@ -111,9 +112,10 @@ npm run build       # copies the engine into dist/ocr/ (adds ~15 MB to dist/)
 ## Limitations
 
 - **Cropping.** Boxes are in the pixels of the file that was scanned. If the preview, or the post, shows a crop of that file, the boxes are offset or fall outside it. Scan the cropped image, or draw the preview from the same file with no extra crop. `object-fit: cover` crops too, and `imageBoxToPreview` trims or drops boxes in the cut-off part.
-- **Rotation.** EXIF rotation from phones is applied before scanning, so boxes match how the photo looks. Text that is itself rotated or slanted is not straightened. Sideways text (the `rotated-sign.png` sample) comes out as garbage with low confidence. Ask the user to type it.
+- **Rotation.** EXIF rotation from phones is applied before scanning, so boxes match how the photo looks. Text that is itself rotated or slanted is not straightened. Slightly tilted text (the `rotated-sign.png` sample) reads fine since the engine uses automatic page layout; strongly tilted or sideways text still won't. Ask the user to type it.
+- **Everyday photos (scene text).** On a photo of a building, Tesseract reads the sign but also turns brickwork and windows into junk "words". `scene.ts` keeps only clearly readable lines (the rest is counted in `OcrResult.droppedWords` and the user is told), and engine.ts re-reads an enlarged crop around SMALL text it found, which recovers missed words (e.g. "WATERS" in "WATERS RESIDENCE HALL"). Text that the first read misses completely is not zoomed into. Enlarging the whole photo instead was tried: in Chrome, Tesseract then finds nothing.
 - **Handwriting and stylized lettering** are often misread (see `script-card.png`: "Birthday" → "Burtivday"). That's why the user reviews the text, and why low-confidence words are flagged.
-- **Photos without text** often produce a few low-confidence "words" from shapes (`no-text.png` gives `y -`). We don't silently delete them, because that would hide observed text. `reviewHint()` tells the user when everything found is unclear.
+- **Photos without text** used to produce a few low-confidence "words" from shapes (`no-text.png` gave `y -`). These are now left out by `scene.ts`, and the user is told how many unclear bits were left out (`describePhotoRead()` in `src/photo-text.ts`).
 - **Scanned image vs. Instagram's final image.** We scan the file the user picks. Instagram may then crop it (e.g. to 1:1 or 4:5), resize and compress it, apply filters, or let the user add text and stickers in its editor. Text added in Instagram is not in our file, and text cropped away by Instagram may still be in our scan. Whether the final edited image can be read from the page is unverified (`docs/ROADMAP.md`, assumption 4).
 - **Language.** English only (`eng`, 4.0.0 best_int). Other scripts need more language files, each about 1-10 MB.
 - **Size and speed.** About 1-3 seconds per image on the test machine. One engine is started per scan and stopped afterwards. Very large images are refused (`OCR_LIMITS`), not scaled down.

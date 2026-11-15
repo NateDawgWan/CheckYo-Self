@@ -69,6 +69,12 @@ export interface OcrResult {
   lowConfidenceWordIds: string[];
   /** e.g. "tesseract.js 7.0.0 / eng 4.0.0_best_int", for debugging. */
   engine: string;
+  /**
+   * How many unclear or junk "words" (brickwork, windows, patterns...) the
+   * reader found but left out, because only clearly readable lines are kept
+   * (see scene.ts). Missing or 0 when nothing was left out.
+   */
+  droppedWords?: number;
 }
 
 /** Words with confidence under this are flagged as "check this word". */

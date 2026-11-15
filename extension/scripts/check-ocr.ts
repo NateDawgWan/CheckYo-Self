@@ -9,9 +9,10 @@
 // and WASM; for that, open ocr-demo.html in the loaded extension (see
 // src/ocr/README.md). Uses only local files; nothing is downloaded.
 import { readFileSync } from "node:fs";
-import { createWorker } from "tesseract.js";
+import { createWorker, PSM } from "tesseract.js";
 import { pageToOcrResult, type RawPage } from "../src/ocr/convert";
 import { locateQuote } from "../src/ocr/review";
+import { combineReads } from "../src/ocr/scene";
 import type { OcrResult } from "../src/ocr/types";
 
 const IMAGES = "src/ocr/demo/images";
@@ -29,12 +30,15 @@ function check(ok: boolean, label: string): void {
 }
 
 const worker = await createWorker("eng", 1, { langPath: LANG_DIR, cacheMethod: "none", gzip: true });
+await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO }); // same as engine.ts
 
+// Same steps as engine.ts, except zooming in on small text (needs a browser canvas;
+// the demo images' text is big enough not to need it).
 async function scan(name: string): Promise<OcrResult> {
   const bytes = readFileSync(`${IMAGES}/${name}`);
   const { width, height } = pngSize(bytes);
   const { data } = await worker.recognize(bytes, {}, { text: true, blocks: true });
-  const result = pageToOcrResult(data as RawPage, 1, width, height, "check-ocr");
+  const result = pageToOcrResult(combineReads([{ page: data as RawPage, scale: 1 }]).page, 1, width, height, "check-ocr");
   console.log(`\n${name}: status=${result.status}, ${result.words.length} words, confidence=${result.confidence}`);
   console.log(`  text: ${JSON.stringify(result.text)}`);
   return result;
@@ -59,8 +63,11 @@ try {
   check(blank.status === "no_text" || blank.words.every((w) => w.confidence < 70),
     "no-text: empty, or only low-confidence noise for the user to delete");
 
-  // 3./4. Limitations: printed for information, not checked.
-  await scan("rotated-sign.png");
+  // 3. A slightly tilted sign: readable since automatic page layout (PSM.AUTO).
+  const rotated = await scan("rotated-sign.png");
+  check(locateQuote(rotated, "Maple Street Bakery").found, "rotated: \"Maple Street Bakery\" read");
+
+  // 4. Limitation: script lettering. Printed for information, not checked.
   await scan("script-card.png");
 } finally {
   await worker.terminate();

@@ -65,13 +65,14 @@ extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
 extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
+extension/src/ocr/scene.ts    Text in everyday photos: keeps only clearly readable lines (drops brickwork/window junk), zooms into small text, merges reads (tested)
 extension/src/dashboard/      Full-page dashboard (public/dashboard.html, opened as the extension's Options page): scores, cross-post view, offline keyword-rule mode
 extension/src/verdict.ts      Popup verdict: risk score, LOW/MEDIUM/HIGH stamp, "Before you drop that post" advice (display only; reuses dashboard/report.ts scoring)
                               Scoring: findings add up, but never below the worst single finding's minimum (findingFloor: sensitive high 75, high 50, sensitive medium 50, medium 25; halved at low confidence). Sensitive = identity, financial, health, children (1.5x weight).
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
 extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
 extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo
-extension/src/photo-text.ts   Photo-text rules (popup + Instagram): unreliable reads are discarded (empty box + notice), noisy reads get a notice, strict 1000-char limit (tested)
+extension/src/photo-text.ts   Photo-text rules (popup + Instagram): unreliable reads are discarded (empty box + notice), noisy reads get a notice, left-out junk is reported, strict 1000-char limit (tested)
 extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
 extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
 extension/src/ports.ts        Interfaces + stand-ins for OCR, the warning panel, history
