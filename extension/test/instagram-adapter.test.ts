@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   classifyOutcomeText,
   classifyPostType,
+  carouselArrows,
   isCarouselHintLabel,
   isShareLabel,
   normalizeCaption,
@@ -77,4 +78,16 @@ test("any video makes it a video post", () => {
 
 test("no photo found is 'unknown', never guessed as single-photo", () => {
   assert.equal(classifyPostType({ photoCount: 0, hasVideo: false, carouselHints: 0 }), "unknown");
+});
+
+test("carousel arrows tell whether more photos are to the right, or this is the last one", () => {
+  const english = textForLanguage("en")!;
+  // Photo 1 of 2 (VERIFIED on the live site): only "Right chevron".
+  assert.deepEqual(carouselArrows(["Right chevron", "Down chevron icon"], english), { hasNext: true, hasPrev: false });
+  // Last photo: only "Left chevron".
+  assert.deepEqual(carouselArrows(["Left chevron"], english), { hasNext: false, hasPrev: true });
+  // A middle photo: both.
+  assert.deepEqual(carouselArrows(["Left chevron", "Right chevron"], english), { hasNext: true, hasPrev: true });
+  // A single photo: neither (other labels are ignored).
+  assert.deepEqual(carouselArrows(["Back", null, "Down chevron icon"], english), { hasNext: false, hasPrev: false });
 });
