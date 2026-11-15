@@ -199,8 +199,16 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       // Does NOT share. Only lets the user's next real click on Share through.
       flow.allowNextShare(Date.now());
       const p = getPanel();
-      p.setShareReady(flow.isShareAllowed(Date.now()));
+      const ready = flow.isShareAllowed(Date.now());
+      p.setShareReady(ready);
       p.setMessage(flow.hasCurrentResult() ? "" : "Not checked. Click Share when you're ready.");
+      if (ready) {
+        // Get out of the way: the open panel can cover Instagram's Share
+        // button (checked live). The small corner button now says "Ready";
+        // clicking it reopens the panel (and checks again) without cancelling.
+        p.close();
+        p.showLauncher(true);
+      }
     },
     onApplyEdit(edit) {
       void applyEdit(edit);

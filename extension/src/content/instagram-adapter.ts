@@ -17,6 +17,7 @@ export interface InstagramText {
   share: string[];     // the Share button on the caption step
   published: string[]; // text shown after a successful share
   failed: string[];    // text shown when a share fails
+  slideArrows: string[]; // aria-labels of the arrows next to the photo when SEVERAL photos are selected
 }
 
 /**
@@ -28,8 +29,13 @@ export interface InstagramText {
 export const TEXT_BY_LANGUAGE: Record<string, InstagramText> = {
   en: {
     share: ["share"], // VERIFIED 2026-11-14
-    published: ["your post has been shared", "post shared"], // UNVERIFIED
+    published: ["your post has been shared", "post shared"], // VERIFIED 2026-11-15 (title "Post shared", text "Your post has been shared.")
     failed: ["couldn't be shared", "could not be shared", "couldn't share", "something went wrong", "try again"], // UNVERIFIED
+    // VERIFIED 2026-11-15: a 2-photo post's caption step shows "Right chevron"
+    // on photo 1 and "Left chevron" on photo 2; a single photo shows neither.
+    // NOT "Down chevron icon": that is on the Accessibility / Advanced settings
+    // sections of every post. "go back"/"next" are older guesses (UNVERIFIED).
+    slideArrows: ["right chevron", "left chevron", "go back", "next"],
   },
 };
 
@@ -82,9 +88,15 @@ const SELECTORS = {
   previewImage: 'img[src^="blob:"]',
   previewCanvas: "canvas",
   video: "video",
-  // UNVERIFIED: arrows/dots shown next to the photo when several are selected.
-  carouselHint: '[aria-label="Go back"], [aria-label="Next"], [aria-label*="slide" i]',
+  // Anything with a label; isCarouselHintLabel() decides which ones are
+  // the arrows shown next to the photo when several are selected.
+  labelled: "[aria-label]",
 };
+
+/** Is this aria-label one of the slide arrows of a multi-photo post? (see slideArrows) */
+export function isCarouselHintLabel(label: string | null | undefined, words: InstagramText): boolean {
+  return words.slideArrows.includes((label ?? "").trim().toLowerCase());
+}
 
 /** Images smaller than this (in CSS pixels) are icons or avatars, not the post. */
 const MIN_PREVIEW_SIZE = 150;
@@ -189,7 +201,8 @@ export function readComposer(doc: Document): ComposerSnapshot {
     const postType = classifyPostType({
       photoCount: images.length,
       hasVideo: dialog.querySelector(SELECTORS.video) !== null,
-      carouselHints: dialog.querySelectorAll(SELECTORS.carouselHint).length,
+      carouselHints: [...dialog.querySelectorAll(SELECTORS.labelled)]
+        .filter((node) => isCarouselHintLabel(node.getAttribute("aria-label"), words)).length,
     });
 
     return {

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   classifyOutcomeText,
   classifyPostType,
+  isCarouselHintLabel,
   isShareLabel,
   normalizeCaption,
   textForLanguage,
@@ -56,6 +57,18 @@ test("one photo and nothing else is a single-photo post", () => {
 test("several photos, or carousel arrows, make a multi-photo post", () => {
   assert.equal(classifyPostType({ photoCount: 2, hasVideo: false, carouselHints: 0 }), "multi-photo");
   assert.equal(classifyPostType({ photoCount: 1, hasVideo: false, carouselHints: 1 }), "multi-photo");
+});
+
+// Bug found live 2026-11-15: a 2-photo post showed only ONE photo on the
+// caption step, and its arrows are labelled "Right chevron" / "Left chevron",
+// which the old selector missed, so it was treated as single-photo.
+test("Instagram's slide arrows count as carousel hints, other chevrons don't", () => {
+  assert.equal(isCarouselHintLabel("Right chevron", english), true);
+  assert.equal(isCarouselHintLabel("Left chevron", english), true);
+  assert.equal(isCarouselHintLabel("Down chevron icon", english), false); // on every post
+  assert.equal(isCarouselHintLabel("Back", english), false);              // the composer's back arrow
+  assert.equal(isCarouselHintLabel("Tag people", english), false);
+  assert.equal(isCarouselHintLabel(null, english), false);
 });
 
 test("any video makes it a video post", () => {

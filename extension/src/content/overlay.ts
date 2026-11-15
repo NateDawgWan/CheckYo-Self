@@ -180,6 +180,11 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
     },
     setShareReady(ready) {
       shareReady.hidden = !ready;
+      // After "Continue" the panel closes (it can cover Instagram's Share
+      // button), so the corner button tells the user what to do next.
+      launcher.textContent = ready
+        ? "Second Look: ready. Click Instagram's Share to post."
+        : "Second Look: Check this post";
     },
     destroy() {
       host.remove();

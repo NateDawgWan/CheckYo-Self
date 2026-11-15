@@ -124,5 +124,5 @@ export interface HistoryImportRequest {
 - **Live Databricks** has never been tested with real credentials. Run `npm run check:databricks` (in `backend/`) once someone has them; it must print `Success. Connection verified.`
 - The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **neither the popup nor the Instagram panel uses it yet**.
 - History storage is not implemented (only its interface in `ports.ts`, with a stand-in).
-- Instagram integration covers single-photo posts in English only. Blocking Share is verified on the live site; letting a share through and detecting "published" are **not** (that needs a real post). See `docs/ROADMAP.md`.
+- Instagram integration covers single-photo posts in English only. Blocking Share, letting a share through after "Continue", detecting "published", and staying out of the way for 2-photo posts are verified on the live site (2026-11-15). Failure screens and video posts are **not**. See `docs/ROADMAP.md`.
 - The popup has only been checked through its code and automated tests, not by clicking through it in Chrome.
