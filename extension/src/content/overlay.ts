@@ -32,6 +32,7 @@ const PANEL_CSS = `
 .panel[hidden], .launcher[hidden] { display: none; }
 .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .panel-head h1 { font-size: 16px; }
+.panel-head-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .close { padding: 2px 8px; }
 .intro { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .share-ready { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--low-mark); color: var(--low); font-weight: 600; }
@@ -79,7 +80,13 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
 
   const head = el("div", "panel-head");
   const title = el("h1", undefined, "CheckYo'Self");
-  head.append(title, button("Close", "secondary small close", () => actions.onBack()));
+  // Same pill as the popup (popup.css .status-pill), so you can see whether the AI is reachable.
+  const statusPill = el("span", "status-pill", "Checking backend…");
+  statusPill.dataset.state = "checking";
+  statusPill.setAttribute("role", "status");
+  const headRight = el("div", "panel-head-right");
+  headRight.append(statusPill, button("Close", "secondary small close", () => actions.onBack()));
+  head.append(title, headRight);
   const intro = el("p", "intro");
 
   const imageLabel = el("label", undefined, "Text in the photo");
@@ -171,6 +178,11 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       photoNotices.replaceChildren(
         ...notices.map((n) => el("p", n.kind === "poor" ? "banner banner-incomplete photo-poor" : "banner banner-stale photo-warning", n.text)),
       );
+    },
+    setBackendStatus(status) {
+      statusPill.dataset.state = status.state;
+      statusPill.textContent = status.label;
+      statusPill.title = status.title;
     },
     setBusy(busy) {
       checkButton.disabled = busy;

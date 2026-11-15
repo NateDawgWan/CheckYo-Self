@@ -11,7 +11,7 @@
 //
 // The worker talks ONLY to our local backend (BACKEND_URL in api.ts). It never
 // talks to Databricks and holds no credentials.
-import { analyzeDraft } from "./api";
+import { analyzeDraft, checkHealth, describeBackendStatus } from "./api";
 import { handleOcrImageMessage, isOcrImageMessage, type OcrRunMessage, type OcrRunReply } from "./ocr-relay";
 import { noHistory } from "./ports";
 import { handleWorkerMessage } from "./worker-handler";
@@ -27,7 +27,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // tells Chrome we won't answer them.
   if (!isForWorker(message)) return false;
 
-  const deps = { extensionId: chrome.runtime.id, analyze: analyzeDraft, history: noHistory };
+  const deps = {
+    extensionId: chrome.runtime.id,
+    analyze: analyzeDraft,
+    history: noHistory,
+    // The Instagram panel's status pill: same wording as the popup's.
+    backendStatus: async () => describeBackendStatus(await checkHealth()),
+  };
   handleWorkerMessage(message, sender, deps).then(sendResponse);
   // Returning true keeps the reply channel open while we wait for the backend.
   return true;
@@ -35,7 +41,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 function isForWorker(message: unknown): boolean {
   const kind = (message as { kind?: unknown } | null)?.kind;
-  return kind === "check-draft" || kind === "post-published";
+  return kind === "check-draft" || kind === "post-published" || kind === "get-backend-status";
 }
 
 // ---------------------------------------------------------------------------

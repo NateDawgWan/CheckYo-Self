@@ -349,11 +349,26 @@ export interface HistoryDeleteResponse {
  *                           page showed a confirmed publication (not on cancel,
  *                           failure or "unknown").
  *  - "get-instagram-draft": popup -> content script. Reply: InstagramDraftReply.
+ *  - "get-backend-status":  content script -> service worker. The worker asks
+ *                           GET /api/health (no Databricks call) and replies with
+ *                           a BackendStatusReply for the Instagram panel's pill.
  */
 export type ExtensionMessage =
   | { kind: "check-draft"; requestId: number; draftHash: string; sources: TextSource[] }
   | { kind: "post-published"; draftHash: string; postId: string | null; publishedAt: string }
-  | { kind: "get-instagram-draft" };
+  | { kind: "get-instagram-draft" }
+  | { kind: "get-backend-status" };
+
+/**
+ * Reply to "get-backend-status": what the status pill shows. Same values as
+ * the popup's pill (describeBackendStatus() in extension/src/api.ts).
+ */
+export interface BackendStatusReply {
+  kind: "backend-status";
+  state: "offline" | "mismatch" | "mock" | "databricks-unverified" | "databricks-verified" | "databricks-failing";
+  label: string;
+  title: string;
+}
 
 /** Reply to "check-draft". `requestId` is echoed so old replies can be ignored. */
 export type CheckDraftReply =
