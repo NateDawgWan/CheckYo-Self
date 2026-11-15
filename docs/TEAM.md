@@ -43,25 +43,26 @@ What each side can rely on (see the comments in `shared/contract.ts`):
 - `SuggestedEdit` with `replace` / `generalize` always has non-blank `replacement`; edits that break the rules arrive as `other` (advice only). The extension still re-checks with `extension/src/edits.ts` before applying.
 - `HealthResponse.databricks.state` is `"verified"` only after a real call succeeded. Settings alone give `"configured_unverified"`.
 
-### B. OCR → warning interface (owners 3 and 2) — **proposed**, milestone 2
+### B. OCR → warning interface (owners 3 and 2) — **in code** (OCR module), popup wiring **not done yet**, milestone 2
 
-OCR runs inside the extension and produces ordinary `TextSource` objects, so the backend needs no change.
+OCR runs inside the extension and produces ordinary `TextSource` objects, so the backend needs no change. Full details, integration steps and limitations: `extension/src/ocr/README.md`.
 
 ```ts
-// extension/src/ocr/index.ts (proposed)
+// extension/src/ocr/index.ts
 // Reads text from one image on the user's computer. Never uploads the image.
-export async function readImageText(image: Blob, index: number): Promise<OcrResult>;
-
-// Proposed new type in shared/contract.ts
-export interface OcrResult {
-  sourceId: string;   // "image_text:<index>"
-  text: string;       // the user can edit this before checking
-  confidence: number; // 0-100 from the OCR engine, shown as a hint
-}
+export async function readImageText(image: Blob, index: number,
+  options?: { signal?: AbortSignal; onProgress?: (p: OcrProgress) => void }): Promise<OcrResult>;
+export function startReview(result: OcrResult): OcrReview;            // user reviews/corrects
+export function reviewToTextSource(review: OcrReview): ToSourceResult; // -> { id: "image_text:<n>", type: "image_text", text }
+export function locateQuote(result: OcrResult, quote: string): QuoteLocation; // evidence quote -> word boxes
+export function imageBoxesToPreview(boxes: OcrBox[], layout: PreviewLayout): PreviewRect[]; // boxes -> resized preview
 ```
 
+- `OcrResult` has `sourceId`, `status` (`"text_found"` | `"no_text"`), `text`, mean `confidence`, `imageWidth`/`imageHeight`, and `words`/`lines` with stable ids (`image_text:1#w3`), boxes and per-word confidence.
+- **Failures throw `OcrError`** (`CANCELLED`, `NOT_AN_IMAGE`, `IMAGE_TOO_LARGE`, `ENGINE_LOAD_FAILED`, `RECOGNITION_FAILED`). A failure is never an empty "no text" result.
+- The OCR types live in `extension/src/ocr/types.ts`, **not** in `shared/contract.ts` as first proposed. They never cross the network or a Chrome message, and keeping boxes and image sizes out of the shared file means the backend can't start accepting them by accident. What crosses the network is the existing `TextSource`.
 - The popup shows the OCR text in the existing "Text in the photo" box for the user to correct, then sends it as `{ id: "image_text:<n>", type: "image_text", text }`.
-- Manifest V3 forbids remote code: the OCR engine, its WASM and language data must be bundled in `extension/` (see `docs/ROADMAP.md`).
+- Manifest V3 forbids remote code: the engine worker, WASM cores and English data are bundled into `dist/ocr/` by `extension/build.mjs`. Owner 2: please add `'wasm-unsafe-eval'` to the extension-page CSP in `manifest.json` (exact snippet in the OCR README).
 
 ### C. Instagram page → extension (owners 4 and 2) — **proposed**, milestone 4
 
@@ -106,5 +107,6 @@ POST   /api/analyze  { ..., includeHistory: true } -> AnalyzeResponse with histo
 
 - **Live Databricks** has never been tested with real credentials. Run `npm run check:databricks` (in `backend/`) once someone has them; it must print `Success. Connection verified.` Results go in `docs/TEST_RESULTS.md`.
 - **Databricks history storage** isn't built on the app side yet. The backend uses a temporary in-memory store; verify the real one with `npm run check:history`.
-- OCR, Instagram integration and the extension's history screen are not implemented (only planned above).
+- The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **the popup doesn't use it yet**.
+- Instagram integration and the extension's history screen are not implemented (only planned above).
 - The popup has only been checked through its code and automated tests, not by clicking through it in Chrome.

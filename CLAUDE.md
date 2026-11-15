@@ -8,8 +8,9 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 - Mock mode is tested: typechecks, extension build, `npm test` regression tests in both packages, and manual `curl` checks of `/api/health` and `/api/analyze`.
 - Databricks: the backend calls the Databricks App `instagram-risk-analyzer` (maintained by Genie, outside this repo), which relays to the hosted model. The connector supports OAuth service-principal tokens (default) and PATs, and is tested only against a fake `fetch`. It has **not** passed a live credentialed test. Treat it as unverified until `npm run check:databricks` prints `Success. Connection verified.` "Configured" (settings filled in) is not "verified". Probes show the app redirects token calls outside `/api/` to a browser login; see `docs/DATABRICKS_APP_API.md`.
 - History (milestone 3, backend side): explicit import of approved, published posts; relevant-history retrieval for analysis; per-user isolation; deletion and approval revocation; AI interpretations stored apart from observed posts. Storage is the **temporary in-memory dev store** (`HISTORY_STORE=dev-memory`, lost on restart). The Databricks App store (`databricks-app`) is written against a spec Genie has not built yet, so it's unverified. No extension UI for history yet.
+- Milestone 2 (in progress): local OCR module in `extension/src/ocr/` (Tesseract.js, bundled; unit tests, `npm run check:ocr`, and a local test page). Not yet wired into the popup, and not yet run inside the loaded extension.
 - Live vs. mock results: `docs/TEST_RESULTS.md`. Team ownership and interfaces: `docs/TEAM.md`.
-- Instagram interception and automatic image OCR are future milestones unless subsequent code and tests establish otherwise.
+- Instagram interception is a future milestone unless subsequent code and tests establish otherwise.
 - Implement only the milestone assigned in the current task.
 - Preserve the existing working structure; do not reorganize it without a concrete need.
 
@@ -61,6 +62,7 @@ extension/src/popup.ts        Popup wiring, draft hashing, stale detection, appl
 extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
+extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
 backend/test/, extension/test/  Regression tests (node:test, run with `npm test`)
 docs/ROADMAP.md               Next milestones, history storage plan, Instagram assumptions
 docs/TEAM.md                  Module owners and integration interfaces (in code vs. proposed)
@@ -86,6 +88,7 @@ cd extension && npm run watch
 # Checks (run all of these before committing)
 cd backend && npm run typecheck && npm test
 cd extension && npm run typecheck && npm test && npm run build
+cd extension && npm run check:ocr           # real OCR engine on the fictional demo images
 
 # Databricks (only with real credentials in backend/.env)
 cd backend && npm run check:databricks    # must print "Success. Connection verified."
