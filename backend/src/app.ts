@@ -413,6 +413,11 @@ export function createApp(deps: AppDeps) {
 
   // --- Errors ----------------------------------------------------------------
 
+  // Unknown /api route: say so as JSON (the extension shows it), instead of Express's HTML page.
+  app.use("/api", (req, _res, next) => {
+    next(new AppError("NOT_FOUND", 404, `This backend has no ${req.method} ${req.baseUrl}${req.path}. If you just updated CheckYo'Self, restart the backend.`));
+  });
+
   // Turns any error into an ErrorResponse the extension understands.
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const requestId: string | undefined = res.locals.requestId;

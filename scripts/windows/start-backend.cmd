@@ -27,6 +27,8 @@ rem Already running? Then there is nothing to do.
 netstat -ano -p TCP | findstr /r /c:"127\.0\.0\.1:8787 .*LISTENING" >nul
 if not errorlevel 1 (
   echo The CheckYo'Self backend is already running on http://127.0.0.1:8787.
+  echo If you updated the code since it started, it is still running the OLD code:
+  echo run stop-backend.cmd, then this file again.
   exit /b 0
 )
 

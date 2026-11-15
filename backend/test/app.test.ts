@@ -555,3 +555,10 @@ test("assess: refuses other users' posts, unknown ids, duplicates, too many, and
   assert.equal((await call("POST", "/api/history/assess", null, assessBody(["b1"]))).status, 400);
   assert.equal((await call("POST", "/api/history/assess", BOB, { ...assessBody(["b1"]), sources: [] })).status, 400, "no extra fields");
 });
+
+test("an unknown /api route gets a JSON error saying to restart an updated backend", async () => {
+  const res = await call("POST", "/api/history/no-such-thing", ALICE, { contractVersion: CONTRACT_VERSION });
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error.code, "NOT_FOUND");
+  assert.match(res.body.error.message, /no POST \/api\/history\/no-such-thing.*restart the backend/);
+});

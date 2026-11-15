@@ -23,6 +23,12 @@ import {
 import { BACKEND_URL } from "./api";
 import { getUserId } from "./user-id";
 
+/** Shown when the backend doesn't have a route the extension uses. */
+export const OUTDATED_BACKEND =
+  "The backend running on this computer is older than the extension (it doesn't know this feature). " +
+  "Update it and restart it: pull the latest code, run scripts\\windows\\stop-backend.cmd, then start-backend.cmd " +
+  "(or stop and rerun `npm run dev` in backend/).";
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { [USER_ID_HEADER]: await getUserId() };
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -34,7 +40,11 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error((data as ErrorResponse | null)?.error?.message ?? `Backend returned HTTP ${res.status}.`);
+    const message = (data as ErrorResponse | null)?.error?.message;
+    if (message) throw new Error(message);
+    // No JSON error at all: the backend doesn't know this route, i.e. it runs older code than the extension.
+    if (res.status === 404) throw new Error(OUTDATED_BACKEND);
+    throw new Error(`Backend returned HTTP ${res.status}.`);
   }
   return data as T;
 }
