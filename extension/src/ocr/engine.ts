@@ -163,7 +163,13 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
       // never settles if the LANGUAGE FILE fails to load (it swallows that
       // error), which would leave the scan stuck until the timeout.
       errorHandler: (error: unknown) => workerCrashed?.(error),
-    });
+    }, {
+      // Tesseract writes status notes ("Estimating resolution as 242", "Detected
+      // 4 diacritics") to its error output, which Chrome lists as extension
+      // "Errors". They're harmless; send them nowhere. (Init-only setting;
+      // a real Tesseract variable that Tesseract.js's types don't list.)
+      debug_file: "/dev/null",
+    } as Parameters<typeof createWorker>[3]);
     // If we gave up (cancel or timeout) before the engine finished starting,
     // stop it as soon as it does start.
     starting.then((w) => { if (finished) void w.terminate(); }, () => {});

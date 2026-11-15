@@ -29,7 +29,8 @@ function check(ok: boolean, label: string): void {
   if (!ok) failures++;
 }
 
-const worker = await createWorker("eng", 1, { langPath: LANG_DIR, cacheMethod: "none", gzip: true });
+// debug_file: same as engine.ts (silences "Estimating resolution..." notes).
+const worker = await createWorker("eng", 1, { langPath: LANG_DIR, cacheMethod: "none", gzip: true }, { debug_file: "/dev/null" } as Parameters<typeof createWorker>[3]);
 
 /** One whole-photo read with the given page layout. */
 async function read(bytes: Buffer, mode: PSM): Promise<RawPage> {
