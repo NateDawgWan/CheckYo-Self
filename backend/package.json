@@ -1,0 +1,26 @@
+{
+  "name": "second-look-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Small backend that sends post text to Databricks and returns privacy findings.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "check:databricks": "tsx scripts/ping-databricks.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "16.4.7",
+    "express": "4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "4.17.21",
+    "@types/node": "22.10.2",
+    "tsx": "4.19.2",
+    "typescript": "5.7.2"
+  }
+}

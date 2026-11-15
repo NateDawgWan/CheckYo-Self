@@ -1,0 +1,208 @@
+/* Design idea: the user's own words appear like a proof marked up by a reviewer —
+   a serif "page" with highlighter marks. The rest of the UI stays quiet. */
+:root {
+  color-scheme: light dark;
+  --paper: #f4f6fa;
+  --surface: #ffffff;
+  --ink: #1c2740;
+  --muted: #5a647a;
+  --line: #d3d9e5;
+  --accent: #2a55c9;
+  --accent-ink: #ffffff;
+  --high: #b4302a;
+  --high-mark: #f9d3cf;
+  --medium: #a8650c;
+  --medium-mark: #fbe3b5;
+  --low: #3c7552;
+  --low-mark: #d3ead9;
+  --mock: #eceafb;
+  --mock-ink: #3f3790;
+  --stale: #fff4d6;
+  --stale-ink: #6b4a00;
+  --ui-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --page-font: Charter, "Iowan Old Style", Georgia, "Times New Roman", serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #151b29;
+    --surface: #1e2637;
+    --ink: #e6eaf3;
+    --muted: #a3acc0;
+    --line: #34405a;
+    --accent: #7b9cf0;
+    --accent-ink: #0f1626;
+    --high: #f08b84;
+    --high-mark: #5a2623;
+    --medium: #f0b45c;
+    --medium-mark: #57401a;
+    --low: #86c9a0;
+    --low-mark: #22432f;
+    --mock: #2a2752;
+    --mock-ink: #cbc6ff;
+    --stale: #4a3a10;
+    --stale-ink: #ffe3a3;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 420px;
+  min-height: 300px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 14px/1.45 var(--ui-font);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+}
+
+h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+
+main { padding: 0 16px 16px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+}
+
+.status-pill {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.status-pill[data-state="mock"] { background: var(--mock); color: var(--mock-ink); border-color: transparent; }
+.status-pill[data-state="databricks"] { color: var(--low); border-color: currentColor; }
+.status-pill[data-state="offline"] { color: var(--high); border-color: currentColor; }
+
+label { display: block; font-weight: 600; margin: 10px 0 4px; }
+.hint { margin: -2px 0 6px; color: var(--muted); font-size: 12px; }
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 14px/1.5 var(--page-font);
+}
+
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+button {
+  font: inherit;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); }
+button.secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+button.small { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+button:disabled { opacity: 0.55; cursor: progress; }
+button:focus-visible, textarea:focus-visible, mark:focus-visible, .evidence button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.message { min-height: 1.4em; margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.message[data-kind="error"] { color: var(--high); }
+
+.results { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.results.is-stale .marked-draft,
+.results.is-stale .findings,
+.results.is-stale .summary { opacity: 0.45; }
+
+.banner { margin: 0 0 10px; padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+.banner-mock { background: var(--mock); color: var(--mock-ink); }
+.banner-stale {
+  display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  background: var(--stale); color: var(--stale-ink);
+}
+.banner[hidden] { display: none; }
+
+.summary { margin: 0 0 12px; }
+
+/* The memorable part: the draft as a marked-up page. */
+.marked-draft {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font: 15px/1.7 var(--page-font);
+}
+.marked-draft h3 {
+  font: 600 12px/1.3 var(--ui-font);
+  color: var(--muted);
+  margin: 0 0 2px;
+}
+.marked-draft p { margin: 0 0 10px; white-space: pre-wrap; }
+.marked-draft p:last-child { margin-bottom: 0; }
+
+mark {
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+mark.sev-high { background: var(--high-mark); }
+mark.sev-medium { background: var(--medium-mark); }
+mark.sev-low { background: var(--low-mark); }
+mark.flash, .finding.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+.findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+
+.finding {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.finding.sev-high { border-left-color: var(--high); }
+.finding.sev-medium { border-left-color: var(--medium); }
+.finding.sev-low { border-left-color: var(--low); }
+
+.finding-head { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.severity { font-weight: 700; }
+.sev-high .severity { color: var(--high); }
+.sev-medium .severity { color: var(--medium); }
+.sev-low .severity { color: var(--low); }
+
+.exposure { margin: 0 0 8px; font-weight: 600; }
+
+.finding h4 { margin: 8px 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.evidence, .edits { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.evidence button {
+  all: unset;
+  cursor: pointer;
+  font: 14px/1.5 var(--page-font);
+}
+.evidence button:hover .quote { text-decoration: underline; }
+.source-tag { font: 12px var(--ui-font); color: var(--muted); margin-right: 6px; }
+.unverified { font: 12px var(--ui-font); color: var(--high); margin-left: 6px; }
+.uncertainty { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.edits li { font-size: 13px; }
+.edits .apply { margin-left: 6px; }
+
+.empty { color: var(--muted); }
+.meta { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  mark.flash, .finding.flash { animation: none; outline: 2px solid var(--accent); }
+}
