@@ -14,6 +14,8 @@ import {
   type HistoryListResponse,
   type HistoryPost,
   type HistorySuggestResponse,
+  type PortfolioResponse,
+  type PortfolioScanResponse,
   type TextSource,
 } from "../../shared/contract";
 import { BACKEND_URL } from "./api";
@@ -75,7 +77,19 @@ export function deleteAllHistory(): Promise<HistoryDeleteResponse> {
  * The backend adds exactly those posts as "history:<postId>" sources and
  * refuses unknown ones. Only used when the user opted in for this check.
  */
-export function analyzeWithHistory(sources: TextSource[], draftHash: string, historyPostIds: string[]): Promise<AnalyzeResponse> {
-  const body: AnalyzeRequest = { contractVersion: CONTRACT_VERSION, draftHash, sources, historyPostIds };
+export function analyzeWithHistory(sources: TextSource[], draftHash: string, historyPostIds: string[], usePortfolio = false): Promise<AnalyzeResponse> {
+  const body: AnalyzeRequest = { contractVersion: CONTRACT_VERSION, draftHash, sources };
+  if (historyPostIds.length) body.historyPostIds = historyPostIds;
+  if (usePortfolio) body.usePortfolio = true;
   return call("POST", "/api/analyze", body);
+}
+
+/** Scans a few not-yet-scanned saved posts into the profile (live AI). Call again until remaining is 0. */
+export function scanPortfolio(): Promise<PortfolioScanResponse> {
+  return call("POST", "/api/history/portfolio/scan", { contractVersion: CONTRACT_VERSION });
+}
+
+/** The profile: facts found in the saved posts, each with its exact quote. */
+export function getPortfolio(): Promise<PortfolioResponse> {
+  return call("GET", "/api/history/portfolio");
 }

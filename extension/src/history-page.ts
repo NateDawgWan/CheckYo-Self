@@ -6,7 +6,7 @@
 // text to the backend (history-api.ts). Photos never leave the computer.
 import { HISTORY_LIMITS, type HistoryPost, type StoredHistoryPost } from "../../shared/contract";
 import { checkHealth, describeBackendStatus } from "./api";
-import { deleteAllHistory, deleteHistoryPost, importHistory, listHistory } from "./history-api";
+import { deleteAllHistory, deleteHistoryPost, getPortfolio, importHistory, listHistory, scanPortfolio } from "./history-api";
 import { findPostFiles, joinPhotoTexts, parsePostFiles, type ExportPost } from "./instagram-export";
 import { OcrError, readImageText } from "./ocr";
 import { describePhotoRead } from "./photo-text";
@@ -41,6 +41,11 @@ const readPhotos = byId<HTMLInputElement>("read-photos");
 const importButton = byId<HTMLButtonElement>("import");
 const importProgress = byId<HTMLProgressElement>("import-progress");
 const importMessage = byId<HTMLParagraphElement>("import-message");
+const profileSummary = byId<HTMLParagraphElement>("profile-summary");
+const profileBuild = byId<HTMLButtonElement>("profile-build");
+const profileProgress = byId<HTMLProgressElement>("profile-progress");
+const profileMessage = byId<HTMLParagraphElement>("profile-message");
+const profileList = byId<HTMLUListElement>("profile-list");
 
 let saved: StoredHistoryPost[] = [];
 let exportPosts: ExportPost[] = [];
@@ -95,6 +100,7 @@ async function loadSaved(keepMessage = false) {
     }),
   );
   renderPicker(); // "already saved" labels may have changed
+  void loadProfile(); // saved posts changed, so the profile summary may have too
 }
 
 async function removeOne(postId: string) {
@@ -116,6 +122,63 @@ async function removeAll() {
     setText(savedMessage, (err as Error).message, "error");
   }
   await loadSaved(true);
+}
+
+// --- The profile -------------------------------------------------------------------
+
+async function loadProfile() {
+  let profile;
+  try {
+    profile = await getPortfolio();
+  } catch (err) {
+    profileSummary.textContent = "";
+    setText(profileMessage, (err as Error).message, "error");
+    return;
+  }
+  const left = profile.totalPosts - profile.scannedPosts;
+  profileSummary.textContent =
+    profile.totalPosts === 0
+      ? "Save some posts first; then build your profile from them."
+      : `${profile.facts.length} fact${profile.facts.length === 1 ? "" : "s"} from ${profile.scannedPosts} of ${profile.totalPosts} saved posts${left ? ` (${left} not scanned yet)` : " (all scanned)"}.`;
+  profileBuild.disabled = busy || profile.totalPosts === 0;
+  profileBuild.textContent = left ? `Build / update my profile (${left} to scan)` : "Profile up to date";
+  if (!left && profile.totalPosts) profileBuild.disabled = true;
+  profileList.replaceChildren(
+    ...profile.facts
+      .slice()
+      .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+      .map((f) => {
+        const li = el("li", "hist-item");
+        const body = el("div");
+        body.append(el("div", "hist-date", `${shortDate(f.publishedAt)} · ${f.severity} · ${f.category.replace("_", " ")}`), el("p", "hist-caption", f.fact), el("p", "hist-meta", `From the post: “${f.quote}”`));
+        li.append(el("span"), body, el("span"));
+        return li;
+      }),
+  );
+}
+
+/** Scans the saved posts in rounds (a few per request) until all are scanned. */
+async function buildProfile() {
+  busy = true;
+  profileBuild.disabled = true;
+  profileProgress.hidden = false;
+  profileProgress.value = 0;
+  try {
+    for (let round = 0; round < 100; round++) {
+      setText(profileMessage, "Reading your saved posts with the AI… (a few at a time)");
+      const r = await scanPortfolio();
+      profileProgress.value = r.totalPosts ? r.scannedPosts / r.totalPosts : 1;
+      setText(profileMessage, `Scanned ${r.scannedPosts} of ${r.totalPosts} posts · ${r.facts} facts so far`);
+      if (r.remaining === 0 || r.scannedNow === 0) break;
+    }
+    setText(profileMessage, "Profile ready. Use it from the popup: Compare with my past posts → Use my profile.");
+  } catch (err) {
+    setText(profileMessage, `Stopped: ${(err as Error).message} Click the button again to continue where it stopped.`, "error");
+  } finally {
+    busy = false;
+    profileProgress.hidden = true;
+    await loadProfile();
+  }
 }
 
 // --- Import from the export ------------------------------------------------------
@@ -256,6 +319,7 @@ byId<HTMLButtonElement>("select-none").addEventListener("click", () => {
   renderPicker();
 });
 importButton.addEventListener("click", () => void importPicked());
+profileBuild.addEventListener("click", () => void buildProfile());
 
 void showBackendStatus();
 void loadSaved();

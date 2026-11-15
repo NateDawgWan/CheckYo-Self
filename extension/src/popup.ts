@@ -13,7 +13,7 @@ import type {
 import { analyzeDraft, checkHealth, describeBackendStatus, hashSources } from "./api";
 import { historySourcesFor, preselect, suggestionMeta, type Suggestion } from "./compare";
 import { applyEditToText } from "./edits";
-import { analyzeWithHistory, listHistory, suggestHistory } from "./history-api";
+import { analyzeWithHistory, getPortfolio, listHistory, suggestHistory } from "./history-api";
 import { OcrError, readImageText } from "./ocr";
 import { describePhotoRead, photoProgressLabel, PHOTO_TEXT_MAX_CHARS, type PhotoReadNotice } from "./photo-text";
 import { renderResults, type ResultElements } from "./render";
@@ -52,6 +52,9 @@ const comparePanel = byId<HTMLDivElement>("compare-panel");
 const compareStatus = byId<HTMLParagraphElement>("compare-status");
 const compareList = byId<HTMLUListElement>("compare-list");
 const compareRefresh = byId<HTMLButtonElement>("compare-refresh");
+const compareProfileRow = byId<HTMLLabelElement>("compare-profile-row");
+const compareProfile = byId<HTMLInputElement>("compare-profile");
+const compareProfileLabel = byId<HTMLSpanElement>("compare-profile-label");
 const resultEls: ResultElements = {
   root: byId("results"),
   summary: byId("summary"),
@@ -232,6 +235,10 @@ async function loadSuggestions() {
       return;
     }
     suggestions = (await suggestHistory(collectSources().filter((s) => s.text.trim()))).suggestions;
+    // The profile, if one was built: offered (ticked) but the user can untick it.
+    const profile = await getPortfolio();
+    compareProfileRow.hidden = profile.facts.length === 0;
+    compareProfileLabel.textContent = `Use my profile: ${profile.facts.length} fact${profile.facts.length === 1 ? "" : "s"} from ${profile.scannedPosts} saved post${profile.scannedPosts === 1 ? "" : "s"} (finds links even without shared words)`;
   } catch (err) {
     compareStatus.textContent = (err as Error).message;
     compareStatus.dataset.kind = "error";
@@ -294,14 +301,19 @@ async function analyze() {
   try {
     const draftHash = await hashSources(sources);
     const pastIds = isComparing() ? [...comparePicked] : [];
-    const result = pastIds.length > 0 ? await analyzeWithHistory(sources, draftHash, pastIds) : await analyzeDraft(sources, draftHash);
+    const useProfile = isComparing() && !compareProfileRow.hidden && compareProfile.checked;
+    const result =
+      pastIds.length > 0 || useProfile ? await analyzeWithHistory(sources, draftHash, pastIds, useProfile) : await analyzeDraft(sources, draftHash);
     lastResult = result;
     // Show (and highlight) the earlier posts that were used, after the draft.
     const shown = [...sources, ...historySourcesFor(result, savedPosts)];
     renderResults(resultEls, result, shown, applyEdit);
     renderVerdict(verdictEls, result, shown);
     const n = result.findings.length;
-    const compared = result.historyUsed.length ? ` Compared with ${result.historyUsed.length} past post${result.historyUsed.length === 1 ? "" : "s"}.` : "";
+    const parts: string[] = [];
+    if (result.historyUsed.length) parts.push(`${result.historyUsed.length} past post${result.historyUsed.length === 1 ? "" : "s"}`);
+    if (result.portfolioUsed) parts.push(`your profile (${result.portfolioUsed.facts} facts)`);
+    const compared = parts.length ? ` Compared with ${parts.join(" and ")}.` : "";
     if (result.droppedFindings > 0) {
       // Some warnings could not be checked, so don't call this "complete".
       setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${result.droppedFindings} not shown.${compared}`, "error");

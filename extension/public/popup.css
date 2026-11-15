@@ -606,3 +606,5 @@ mark.flash, .finding.flash { animation: flash 1.2s ease-out; }
 .compare-meta { grid-column: 2; font-size: 11px; color: var(--muted); }
 .compare-links { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 0; font-size: 12px; }
 .compare-links a { color: var(--ink); }
+.compare-profile { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; font-weight: 600; font-size: 12.5px; }
+.compare-profile[hidden] { display: none; }

@@ -36,7 +36,24 @@
         <p id="saved-message" class="message" role="status" aria-live="polite"></p>
       </section>
 
-      <!-- 2. Import from Instagram's export -->
+      <!-- 2. The profile: facts from all saved posts -->
+      <section class="hist-section" aria-labelledby="profile-heading">
+        <h2 id="profile-heading" class="section-title">Your profile</h2>
+        <p class="hint">
+          Optional. CheckYo'Self's AI reads your saved posts once and notes the personal facts they reveal (names or parts
+          of names, schools, teams, streets, routines…), each with the exact words it came from. Checks can then connect a
+          new post to ALL your saved posts, even ones that share no words with it. Facts are deleted with their posts.
+        </p>
+        <p id="profile-summary" class="hist-summary">Loading…</p>
+        <div class="hist-actions">
+          <button id="profile-build" type="button" class="primary small">Build / update my profile</button>
+        </div>
+        <progress id="profile-progress" class="photo-progress" max="1" value="0" hidden></progress>
+        <p id="profile-message" class="message" role="status" aria-live="polite"></p>
+        <ul id="profile-list" class="hist-list"></ul>
+      </section>
+
+      <!-- 3. Import from Instagram's export -->
       <section class="hist-section" aria-labelledby="import-heading">
         <h2 id="import-heading" class="section-title">Import past posts</h2>
         <ol class="hist-steps">

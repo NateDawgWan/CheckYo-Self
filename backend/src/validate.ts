@@ -50,7 +50,7 @@ function checkContractVersion(value: unknown) {
 
 export function validateAnalyzeRequest(body: unknown): AnalyzeRequest {
   if (!isPlainObject(body)) fail("Body must be a JSON object.");
-  checkOnlyKeys(body, ["contractVersion", "draftHash", "sources", "historyPostIds"], "request");
+  checkOnlyKeys(body, ["contractVersion", "draftHash", "sources", "historyPostIds", "usePortfolio"], "request");
   checkContractVersion(body.contractVersion);
   if (typeof body.draftHash !== "string" || !HASH_PATTERN.test(body.draftHash)) {
     fail("draftHash must be a 64-character lowercase hex SHA-256.");
@@ -69,7 +69,18 @@ export function validateAnalyzeRequest(body: unknown): AnalyzeRequest {
     if (new Set(ids).size !== ids.length) fail("historyPostIds lists the same post twice.");
     if (ids.length > 0) request.historyPostIds = ids;
   }
+  if (body.usePortfolio !== undefined) {
+    if (typeof body.usePortfolio !== "boolean") fail("usePortfolio must be true or false.");
+    if (body.usePortfolio) request.usePortfolio = true;
+  }
   return request;
+}
+
+/** POST /api/history/portfolio/scan: nothing but the contract version. */
+export function validatePortfolioScan(body: unknown): void {
+  if (!isPlainObject(body)) fail("Body must be a JSON object.");
+  checkOnlyKeys(body, ["contractVersion"], "request");
+  checkContractVersion(body.contractVersion);
 }
 
 /** POST /api/history/suggest: the draft only. */

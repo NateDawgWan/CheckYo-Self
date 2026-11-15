@@ -24,20 +24,37 @@ import {
   type HistoryImportResponse,
   type HistoryListResponse,
   type HistorySuggestResponse,
+  type PortfolioResponse,
+  type PortfolioScanResponse,
+  type StoredHistoryPost,
   type TextSource,
 } from "../../shared/contract";
 import { AppError } from "./errors";
+import {
+  batchToInterpretation,
+  buildFactMessages,
+  parseFacts,
+  profileSource,
+  readPortfolio,
+  SCAN_BATCH,
+  unscannedPosts,
+} from "./history/portfolio";
 import { buildHistorySources, suggestHistory } from "./history/relevance";
 import type { AiInterpretation, HistoryStore } from "./history/store";
 import type { ParsedAnalysis } from "./parse";
+import type { ChatMessage } from "./prompt";
 import {
   validateAnalyzeRequest,
   validateApprovalId,
   validateHistoryImport,
   validateHistorySuggest,
+  validatePortfolioScan,
   validatePostId,
   validateUserId,
 } from "./validate";
+
+/** Profile batches (of SCAN_BATCH posts) scanned per request, to keep each request short. */
+export const PORTFOLIO_BATCHES_PER_CALL = 2;
 
 export interface AppDeps {
   mode: AnalysisMode;
@@ -49,6 +66,11 @@ export interface AppDeps {
    * the answer; errors are passed on. It must NEVER fall back to mock results.
    */
   analyze: (sources: TextSource[]) => Promise<ParsedAnalysis>;
+  /**
+   * Raw model call used to build the profile (portfolio.ts parses it).
+   * Null in mock mode: the profile needs the live AI and is never faked.
+   */
+  extractFacts: ((messages: ChatMessage[]) => Promise<string>) | null;
   historyStore: HistoryStore;
   getDatabricksStatus: () => DatabricksStatus;
   allowedExtensionId?: string;
@@ -131,9 +153,11 @@ export function createApp(deps: AppDeps) {
       let sources: TextSource[] = request.sources;
       let historyUsed: AnalyzeResponse["historyUsed"] = [];
       let userId: string | null = null;
+      let savedPosts: StoredHistoryPost[] | null = null;
       if (request.historyPostIds) {
         userId = userIdOf(req);
-        const stored = new Map((await deps.historyStore.listPosts(userId)).map((p) => [p.postId, p]));
+        savedPosts = await deps.historyStore.listPosts(userId);
+        const stored = new Map(savedPosts.map((p) => [p.postId, p]));
         const missing = request.historyPostIds.filter((id) => !stored.has(id));
         if (missing.length > 0) {
           throw new AppError(
@@ -145,6 +169,19 @@ export function createApp(deps: AppDeps) {
         const chosen = buildHistorySources(request.sources, request.historyPostIds.map((id) => stored.get(id)!));
         sources = [...request.sources, ...chosen.sources];
         historyUsed = chosen.used;
+      }
+
+      // The profile: facts from ALL saved posts, as one "profile" source (opt-in).
+      let portfolioUsed: AnalyzeResponse["portfolioUsed"];
+      if (request.usePortfolio) {
+        userId = userIdOf(req);
+        savedPosts ??= await deps.historyStore.listPosts(userId);
+        const { facts } = readPortfolio(await deps.historyStore.listInterpretations(userId), savedPosts);
+        const profile = profileSource(facts, savedPosts);
+        if (profile) {
+          sources = [...sources, profile];
+          portfolioUsed = { facts: facts.length, posts: new Set(facts.map((f) => f.postId)).size };
+        }
       }
 
       const result = await deps.analyze(sources);
@@ -161,11 +198,12 @@ export function createApp(deps: AppDeps) {
         findings: result.findings,
         droppedFindings: result.droppedFindings,
         historyUsed,
+        ...(portfolioUsed ? { portfolioUsed } : {}),
       };
 
       // Privacy: log ids and counts only — never the post text or the user id.
       console.log(
-        `[${requestId}] mode=${deps.mode} sources=${sources.length} history=${historyUsed.length} ` +
+        `[${requestId}] mode=${deps.mode} sources=${sources.length} history=${historyUsed.length} profileFacts=${portfolioUsed?.facts ?? 0} ` +
           `findings=${body.findings.length} dropped=${body.droppedFindings} ${Date.now() - startedAt}ms`,
       );
       res.json(body);
@@ -265,6 +303,64 @@ export function createApp(deps: AppDeps) {
       await waitForSaves(userId);
       const counts = await deps.historyStore.deleteAll(userId);
       const body: HistoryDeleteResponse = { contractVersion: CONTRACT_VERSION, ...counts };
+      res.json(body);
+    }),
+  );
+
+  // --- The profile ("portfolio") ---------------------------------------------
+
+  // Scans up to PORTFOLIO_BATCHES_PER_CALL batches of not-yet-scanned saved
+  // posts (a few model calls), so each request stays short; the extension calls
+  // again until remaining is 0. Never runs in mock mode.
+  app.post(
+    "/api/history/portfolio/scan",
+    checkOrigin,
+    route(async (req, res) => {
+      const userId = userIdOf(req);
+      validatePortfolioScan(req.body);
+      if (!deps.extractFacts) {
+        throw new AppError("BAD_REQUEST", 400, "Building a profile needs the live AI. The backend is in practice mode (ANALYSIS_MODE=mock).");
+      }
+      await waitForSaves(userId);
+      const posts = await deps.historyStore.listPosts(userId);
+      const { scannedPostIds } = readPortfolio(await deps.historyStore.listInterpretations(userId), posts);
+      const todo = unscannedPosts(posts, scannedPostIds).slice(0, SCAN_BATCH * PORTFOLIO_BATCHES_PER_CALL);
+      let factCount = 0;
+      for (let i = 0; i < todo.length; i += SCAN_BATCH) {
+        const batch = todo.slice(i, i + SCAN_BATCH);
+        const facts = parseFacts(await deps.extractFacts(buildFactMessages(batch)), batch);
+        factCount += facts.length;
+        await deps.historyStore.saveInterpretations(userId, [batchToInterpretation(batch, facts, deps.model, res.locals.requestId)]);
+      }
+      const after = readPortfolio(await deps.historyStore.listInterpretations(userId), posts);
+      console.log(`[${res.locals.requestId}] portfolio scan posts=${todo.length} facts=${factCount} remaining=${posts.length - after.scannedPostIds.size}`);
+      const body: PortfolioScanResponse = {
+        contractVersion: CONTRACT_VERSION,
+        scannedNow: todo.length,
+        scannedPosts: after.scannedPostIds.size,
+        totalPosts: posts.length,
+        remaining: posts.length - after.scannedPostIds.size,
+        facts: after.facts.length,
+      };
+      res.json(body);
+    }),
+  );
+
+  app.get(
+    "/api/history/portfolio",
+    checkOrigin,
+    route(async (req, res) => {
+      const userId = userIdOf(req);
+      await waitForSaves(userId);
+      const posts = await deps.historyStore.listPosts(userId);
+      const { facts, scannedPostIds } = readPortfolio(await deps.historyStore.listInterpretations(userId), posts);
+      const dateOf = new Map(posts.map((p) => [p.postId, p.publishedAt]));
+      const body: PortfolioResponse = {
+        contractVersion: CONTRACT_VERSION,
+        totalPosts: posts.length,
+        scannedPosts: scannedPostIds.size,
+        facts: facts.map((f) => ({ ...f, publishedAt: dateOf.get(f.postId) ?? "" })),
+      };
       res.json(body);
     }),
   );

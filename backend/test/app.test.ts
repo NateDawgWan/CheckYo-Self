@@ -20,6 +20,9 @@ const HASH = "a".repeat(64);
 // --- A test server whose analyzer we can swap per test ---------------------------
 
 let analyzer: AppDeps["analyze"];
+// The fake model used to build the profile; null = like practice mode.
+let extractor: ((messages: { role: string; content: string }[]) => Promise<string>) | null = null;
+let extractCalls = 0;
 let lastSources: TextSource[] = [];
 let store: DevMemoryHistoryStore;
 let baseUrl = "";
@@ -39,6 +42,14 @@ before(async () => {
     },
     get historyStore() {
       return store;
+    },
+    get extractFacts() {
+      return extractor
+        ? (messages: { role: string; content: string }[]) => {
+            extractCalls++;
+            return extractor!(messages);
+          }
+        : null;
     },
     getDatabricksStatus: () => ({ state: "configured_unverified", lastCallAt: null, lastError: null }),
   } as AppDeps);
@@ -390,4 +401,97 @@ test("a failed interpretation save does not affect the analysis reply", async ()
   assert.equal(analysis.body.findings.length, 1);
   await waitForSaves(); // the failure is logged, not thrown
   assert.equal((await call("GET", "/api/history", ALICE)).body.posts.length, 1);
+});
+
+// --- The profile ("portfolio") ------------------------------------------------------
+
+/** A fake model: finds facts by looking for known words in each post. */
+function fakeFactModel(messages: { role: string; content: string }[]): Promise<string> {
+  const json = messages[1].content.split("<posts>\n")[1].split("\n</posts>")[0];
+  const posts = JSON.parse(json) as { id: string; text: string }[];
+  const facts = [];
+  for (const p of posts) {
+    if (p.text.includes("Sarah")) facts.push({ postId: p.id, category: "identity", severity: "medium", fact: "First name: Sarah", quote: "Sarah" });
+    if (p.text.includes("Lincoln Park")) facts.push({ postId: p.id, category: "children", severity: "high", fact: "School: Lincoln Park", quote: "Lincoln Park" });
+    // An invented fact (quote not in the post): must be dropped.
+    if (p.text.includes("Beach")) facts.push({ postId: p.id, category: "location", severity: "low", fact: "Invented place", quote: "Not in the post" });
+  }
+  return Promise.resolve(JSON.stringify({ facts }));
+}
+
+const SCAN = { contractVersion: CONTRACT_VERSION };
+
+test("profile: scanning finds verified facts, marks posts scanned, and isn't repeated", async () => {
+  extractor = fakeFactModel;
+  extractCalls = 0;
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "So proud of Sarah at her recital"), post("p2", "Beach day"), post("p3", "First day at Lincoln Park")]));
+  const scan = await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  assert.equal(scan.status, 200);
+  assert.deepEqual(
+    { now: scan.body.scannedNow, done: scan.body.scannedPosts, left: scan.body.remaining, facts: scan.body.facts },
+    { now: 3, done: 3, left: 0, facts: 2 },
+  );
+  const profile = await call("GET", "/api/history/portfolio", ALICE);
+  assert.deepEqual(profile.body.facts.map((f: any) => f.fact).sort(), ["First name: Sarah", "School: Lincoln Park"], "the invented fact was dropped");
+  const before = extractCalls;
+  const again = await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  assert.equal(again.body.scannedNow, 0, "nothing left to scan");
+  assert.equal(extractCalls, before, "no more model calls");
+  extractor = null;
+});
+
+test("profile: many posts are scanned a few batches per request until none remain", async () => {
+  extractor = fakeFactModel;
+  const many = Array.from({ length: 20 }, (_, i) => post(`m${i}`, `Post number ${i}`, `2026-09-${String(i + 1).padStart(2, "0")}T12:00:00Z`));
+  await call("POST", "/api/history/import", ALICE, importBody(many));
+  const first = await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  assert.equal(first.body.scannedNow, 16, "two batches of 8 per request");
+  assert.equal(first.body.remaining, 4);
+  const second = await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  assert.equal(second.body.remaining, 0);
+  extractor = null;
+});
+
+test("profile: deleting a post removes its facts; the rest of its batch is scanned again", async () => {
+  extractor = fakeFactModel;
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "So proud of Sarah"), post("p3", "First day at Lincoln Park")]));
+  await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  await call("DELETE", "/api/history/posts/p1", ALICE);
+  const after = await call("GET", "/api/history/portfolio", ALICE);
+  assert.equal(after.body.facts.some((f: any) => f.fact === "First name: Sarah"), false);
+  assert.equal(after.body.scannedPosts, 0, "p3 shared the batch, so it's unscanned again");
+  const rescan = await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  assert.equal(rescan.body.facts, 1);
+  extractor = null;
+});
+
+test("profile: users are isolated, and practice mode refuses to build one", async () => {
+  extractor = fakeFactModel;
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "So proud of Sarah")]));
+  await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  assert.equal((await call("GET", "/api/history/portfolio", BOB)).body.facts.length, 0);
+  extractor = null;
+  const refused = await call("POST", "/api/history/portfolio/scan", BOB, SCAN);
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error.message, /live AI/);
+});
+
+test("checks with usePortfolio add ONE profile source with every fact and its quote", async () => {
+  extractor = fakeFactModel;
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "So proud of Sarah at her recital", "2026-03-09T12:00:00Z")]));
+  await call("POST", "/api/history/portfolio/scan", ALICE, SCAN);
+  const res = await call("POST", "/api/analyze", ALICE, { ...analyzeBody("Go Mitchells! Big recital tonight"), usePortfolio: true });
+  assert.equal(res.status, 200);
+  const profile = lastSources.find((src) => src.id === "profile");
+  assert.ok(profile, "profile source added");
+  assert.ok(profile!.text.includes('2026-03-09 · First name: Sarah · "Sarah"'), profile!.text);
+  assert.deepEqual(res.body.portfolioUsed, { facts: 1, posts: 1 });
+  await call("POST", "/api/analyze", ALICE, analyzeBody("Go Mitchells!"));
+  assert.equal(lastSources.some((src) => src.id === "profile"), false, "no profile without the flag");
+  extractor = null;
+});
+
+test("usePortfolio needs a user id and must be true or false", async () => {
+  assert.equal((await call("POST", "/api/analyze", null, { ...analyzeBody("hi"), usePortfolio: true })).status, 400);
+  assert.equal((await call("POST", "/api/analyze", ALICE, { ...analyzeBody("hi"), usePortfolio: "yes" })).status, 400);
 });
