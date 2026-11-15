@@ -127,32 +127,65 @@ export interface PhotoReadNotice {
 
 /** Everything a UI needs after one OCR read: the text to put in the box, notices, and a hint. */
 export interface PhotoReadView {
-  /** The photo text, already cut to PHOTO_TEXT_MAX_CHARS. The user reviews it before checking. */
+  /**
+   * The photo text to put in the box, already cut to PHOTO_TEXT_MAX_CHARS.
+   * EMPTY when the read was unreliable ("poor"): guessed text is never filled in.
+   */
   text: string;
-  /** Poor-quality / noisy / truncated notices (empty when the read is clean). */
+  /** Unreliable / noisy / truncated notices (empty when the read is clean). */
   notices: PhotoReadNotice[];
   /** One line under the box: where the text came from and what to do next. */
   hint: string;
   quality: PhotoQuality;
   truncated: boolean;
+  /** true when the reader's text was thrown away because it wasn't confident enough. */
+  discarded: boolean;
+}
+
+/** What the user is told when an unreliable read is thrown away. */
+export function unreliableReadNotice(result: OcrResult, quality: QualityReport): string {
+  const sure = result.confidence === null ? "" : `confidence ${Math.round(result.confidence)}%, `;
+  return (
+    "No readable text found. The text reader wasn't confident about this photo " +
+    `(${sure}${quality.noisyWordCount} of ${quality.wordCount} "words" unclear), so nothing was added. ` +
+    "Buildings, brickwork, windows, patterns and scenery often look like letters to it. " +
+    "If the photo does have text you want checked, type it in the box."
+  );
 }
 
 /**
- * Applies the size limit and the quality check to one OCR result.
- * Same rules (and notice texts) as the Instagram panel in content/main.ts.
+ * Applies the confidence check and the size limit to one OCR result.
+ * Used by both the popup ("Add a photo") and the Instagram panel (content/main.ts),
+ * so they always behave the same.
+ *
+ *  - poor (low average confidence, or most "words" unclear): the text is NOT
+ *    used. The box stays empty and the user is told why. Sending guessed
+ *    letters to the AI only produces noise.
+ *  - noisy (a few unclear words): the text is used, with a notice to fix it.
+ *  - clean: the text is used.
  */
 export function describePhotoRead(result: OcrResult): PhotoReadView {
-  const limited = limitPhotoText(result.text);
   const quality = assessPhotoQuality(result);
+  if (quality.level === "poor") {
+    return {
+      text: "",
+      notices: [{ kind: "poor", text: unreliableReadNotice(result, quality) }],
+      hint: "Nothing was read from this photo. Type any text you can see in it, or leave the box empty.",
+      quality: quality.level,
+      truncated: false,
+      discarded: true,
+    };
+  }
+  const limited = limitPhotoText(result.text);
   const notices: PhotoReadNotice[] = [];
-  if (quality.message) notices.push({ kind: quality.level === "poor" ? "poor" : "warning", text: quality.message });
+  if (quality.message) notices.push({ kind: "warning", text: quality.message }); // "noisy": some unclear words
   if (limited.truncated) notices.push({ kind: "warning", text: truncationNotice(limited) });
   const sure = result.confidence === null ? "" : ` (confidence ${Math.round(result.confidence)}%)`;
   const hint =
     result.status === "no_text" || !limited.text.trim()
       ? "No text found in the photo. Type any text you can see in it."
       : `Read from the photo on your computer${sure}. Check it and fix any mistakes before checking the post.`;
-  return { text: limited.text, notices, hint, quality: quality.level, truncated: limited.truncated };
+  return { text: limited.text, notices, hint, quality: quality.level, truncated: limited.truncated, discarded: false };
 }
 
 /** Progress line while a photo is read, e.g. "Reading text… 40%". */

@@ -149,12 +149,35 @@ test("a clean read fills the box with no notices and says to check it", () => {
   assert.ok(view.hint.startsWith("Read from the photo on your computer (confidence 90%). Check it"), view.hint);
 });
 
-test("a poor read keeps the text for review but warns explicitly", () => {
+test("an unreliable read is thrown away: empty box, and the user is told why", () => {
   const view = describePhotoRead(ocr([word("oO", 30), word("=", 20), word("©", 20)]));
   assert.equal(view.quality, "poor");
+  assert.equal(view.discarded, true);
+  assert.equal(view.text, "", "guessed letters must not be filled in (or sent to the AI)");
   assert.equal(view.notices.length, 1);
   assert.equal(view.notices[0].kind, "poor");
-  assert.match(view.notices[0].text, /^Poor photo quality/);
+  assert.match(view.notices[0].text, /^No readable text found\. .*nothing was added/);
+  assert.match(view.hint, /^Nothing was read from this photo/);
+});
+
+test("a photo of a building (thousands of low-confidence 'words', reported by a user) gives an empty box, not garbage", () => {
+  // Like the real case: confidence 32%, ~1000 junk "words", ~3000 characters.
+  const junk = ["PN", "=", "y", "_—=", "ZEN", ">", "AW/", "oii", "R", "5", "es", "dh", "SF", "==", "Wl", "|", "TZ", "A", "oa"];
+  const words = Array.from({ length: 1067 }, (_, i) => word(junk[i % junk.length], i % 20 === 0 ? 70 : 25));
+  const view = describePhotoRead(ocr(words));
+  assert.equal(view.discarded, true);
+  assert.equal(view.text, "");
+  assert.equal(view.truncated, false, "no 'lot of text' notice for text we threw away");
+  assert.deepEqual(view.notices.map((n) => n.kind), ["poor"]);
+  assert.match(view.notices[0].text, /confidence \d+%, \d+ of 1067 "words" unclear/);
+});
+
+test("a noisy (mostly readable) read is still filled in, with a notice to fix it", () => {
+  const view = describePhotoRead(ocr([word("Riverside"), word("Youth"), word("Soccer"), word("Coach"), word("Dana"), word("~")]));
+  assert.equal(view.quality, "noisy");
+  assert.equal(view.discarded, false);
+  assert.equal(view.text, "Riverside Youth Soccer Coach Dana ~");
+  assert.deepEqual(view.notices.map((n) => n.kind), ["warning"]);
 });
 
 test("an over-long read is cut to the limit and says so", () => {
