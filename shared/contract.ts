@@ -192,3 +192,44 @@ export interface HealthResponse {
   contractVersion: typeof CONTRACT_VERSION;
   databricks: DatabricksStatus;
 }
+
+// ---------------------------------------------------------------------------
+// PROPOSED interfaces (docs/TEAM.md, interfaces B and D). Added so the warning
+// interface can be built against them. Nothing below crosses the network yet,
+// and no backend or OCR code produces these types yet. Additive only, so
+// CONTRACT_VERSION is unchanged.
+// ---------------------------------------------------------------------------
+
+/**
+ * One word the OCR engine found, with its box in the ORIGINAL image's pixels
+ * (Tesseract.js reports words in this shape). Used only by the popup to draw
+ * highlights on a local preview of the photo. Never sent to the backend.
+ */
+export interface OcrWord {
+  text: string;
+  bbox: { x0: number; y0: number; x1: number; y1: number };
+}
+
+/** Interface B: what local OCR produces for one image (milestone 2). */
+export interface OcrResult {
+  sourceId: string;   // "image_text:<index>"
+  text: string;       // the user can edit this before checking
+  confidence: number; // 0-100 from the OCR engine, shown as a hint
+  /** Optional word boxes, for highlighting evidence on the photo preview. */
+  words?: OcrWord[];
+}
+
+/** Interface D: one earlier post the user may approve importing (milestone 3). */
+export interface HistoryPost {
+  postId: string;      // becomes TextSource id "history:<postId>"
+  postedAt: string;    // ISO 8601
+  caption: string;
+  imageText?: string;  // OCR text only, never the image
+}
+
+/** Interface D (proposed): POST /api/history/import. Not implemented on the backend. */
+export interface HistoryImportRequest {
+  contractVersion: typeof CONTRACT_VERSION;
+  approvalId: string;  // the user's explicit approval for exactly these posts
+  posts: HistoryPost[];
+}

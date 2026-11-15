@@ -108,7 +108,21 @@ export interface HistoryImportRequest {
 
 ### E. Warning interface (owner 2) — **in code**, consumed by everyone
 
-`extension/src/render.ts` → `renderResults(elements, result, sources, onApplyEdit)` draws any `AnalyzeResponse`. The Instagram overlay (C) should reuse it rather than draw warnings a second way. Rules: `textContent` only (never `innerHTML`), show the "Practice mode" banner for `mode: "mock"`, the incomplete banner for `droppedFindings > 0`, and the stale banner when the draft hash changes.
+`extension/src/render.ts` → `renderResults(elements, result, sources, onApplyEdit, { stale })` draws any `AnalyzeResponse`. The Instagram overlay (C) should reuse it rather than draw warnings a second way. Rules: `textContent` only (never `innerHTML`), show the "Practice mode" banner for `mode: "mock"`, the incomplete banner for `droppedFindings > 0`, and the stale banner when the draft hash changes. While stale, Apply is disabled.
+
+The whole interface (consent, states, OCR review, history panel) is `createWarningUi(elements, callbacks)` in `extension/src/ui/warning-ui.ts`. Integration code calls its `show*`/`set*` methods and implements `WarningUiCallbacks`:
+
+| Callback | When | What the integration must do |
+|---|---|---|
+| `onAnalyze(sources)` | user pressed Analyze on the consent step | send **exactly** `sources` (what the user saw) |
+| `onContinueWithoutAnalysis()` | user declined | send nothing; let the post continue |
+| `onReturnToEditing()` | user went back | send nothing |
+| `onApplyEdit(edit, analyzedDraftHash)` | user pressed Apply | refuse if the current draft hash differs; then use `edits.ts` |
+| `onOcrTextChange(sourceId, text, included)` | user corrected/excluded photo text | re-hash the draft (staleness) |
+| `onApproveHistoryImport(approvalId, posts)` | user approved importing these posts | call the history service (D), then `setHistoryState` |
+| `onDeleteHistory()` | user confirmed deleting history | call the history service (D), then `setHistoryState` |
+
+States shown by `show(view)`: `idle`, `loading`, `completed`, `skipped`, `unavailable`, `error` (see `src/ui/state.ts`). The history panel shows approve/delete controls only for `connection: "connected"` or a labeled `"fixture"`. `OcrResult`, `OcrWord` and `HistoryPost` are now in `shared/contract.ts` (types only; no OCR or history code produces them yet). Development fixtures live in `src/ui/fixtures.ts`.
 
 ## Not done yet (do not assume these work)
 
