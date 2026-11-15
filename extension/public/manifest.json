@@ -1,11 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Second Look (MadHacks prototype)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Check what a post could reveal before you share it.",
   "action": {
     "default_title": "Second Look",
     "default_popup": "popup.html"
   },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["instagram.js"],
+      "run_at": "document_start"
+    }
+  ],
   "host_permissions": ["http://127.0.0.1:8787/*"]
 }

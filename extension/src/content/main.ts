@@ -1,0 +1,421 @@
+// Content script for https://www.instagram.com/* (milestone 4).
+//
+// Supported workflow: ONE single-photo post made in the desktop website's
+// "Create" dialog. When the caption step is open, it:
+//   - shows a "Check this post" button (always available, the manual path),
+//   - pauses a click on Share and offers: check / back to editing / continue,
+//   - sends ONLY text to the service worker, which calls our local backend,
+//   - marks results stale on any change, and ignores outdated replies,
+//   - never clicks Share itself: "continue" lets the user's next click through.
+//
+// Instagram-specific page details are in instagram-adapter.ts.
+// The rules (stale, outdated, one-time permission, no double share) are in
+// share-flow.ts, which is unit-tested.
+import type {
+  CheckDraftReply,
+  ExtensionMessage,
+  InstagramDraftReply,
+  SuggestedEdit,
+  TextSource,
+} from "../../../shared/contract";
+import { hashSources } from "../api";
+import { applyEditToText } from "../edits";
+import { unavailableOcr, type OcrPort, type WarningPanel, type WarningPanelActions } from "../ports";
+import {
+  detectPublishOutcome,
+  readComposer,
+  readImageBlob,
+  shareButtonFromEvent,
+  writeCaption,
+  type ComposerSnapshot,
+} from "./instagram-adapter";
+import { createOverlayPanel } from "./overlay";
+import { ShareFlow, draftKey, type PublishOutcome } from "./share-flow";
+
+export interface IntegrationOptions {
+  ocr: OcrPort;
+  createPanel: (actions: WarningPanelActions) => WarningPanel;
+}
+
+export function startInstagramIntegration(options: IntegrationOptions) {
+  const flow = new ShareFlow();
+  let panel: WarningPanel | null = null; // created the first time a composer appears
+
+  // What we last read from the page.
+  let snapshot: ComposerSnapshot = readComposer(document);
+  let imageKey: string | null = null;
+  let imageText = "";   // from OCR, or typed by the user in our panel
+  let ocrTurn = 0;      // to ignore OCR results for a photo that is no longer selected
+  let sharedDraftHash: Promise<string> | null = null; // hash of the draft that was shared
+
+  // -------------------------------------------------------------------------
+  // The draft
+  // -------------------------------------------------------------------------
+
+  /** The draft as TextSources. Only text — never the image. */
+  function currentSources(): TextSource[] {
+    const sources: TextSource[] = [{ id: "caption", type: "caption", text: snapshot.caption }];
+    if (imageText.trim()) sources.push({ id: "image_text:1", type: "image_text", text: imageText });
+    return sources;
+  }
+
+  function currentKey(): string {
+    return draftKey(currentSources(), imageKey);
+  }
+
+  function getPanel(): WarningPanel {
+    if (!panel) panel = options.createPanel(actions);
+    return panel;
+  }
+
+  /** Re-reads the page and reacts to any change. Called (debounced) on every page change. */
+  function scan() {
+    snapshot = readComposer(document);
+
+    if (flow.isPublishing()) watchPublishOutcome();
+
+    if (snapshot.step !== "caption-step") {
+      if (panel) {
+        panel.showLauncher(false);
+        panel.close();
+        panel.setShareReady(false);
+      }
+      if (imageKey !== null || flow.isShareAllowed(Date.now())) {
+        // The user closed the composer or went back a step without sharing.
+        if (flow.isShareAllowed(Date.now())) console.info("[Second Look] Share outcome: cancelled");
+        flow.composerClosed();
+        imageKey = null;
+        imageText = "";
+        panel?.clearResult();
+        panel?.setStale(false);
+      }
+      return;
+    }
+
+    const p = getPanel();
+    if (!p.isOpen()) p.showLauncher(true);
+    p.setUnsupported(snapshot.unsupported);
+
+    // A different photo: forget the old photo text and read the new one.
+    const newImageKey = snapshot.image?.key ?? "no-image";
+    if (newImageKey !== imageKey) {
+      imageKey = newImageKey;
+      imageText = "";
+      startOcr();
+    }
+
+    draftChanged();
+  }
+
+  /** Tell the flow about the current draft; update the stale banner and Share hint. */
+  function draftChanged() {
+    const becameStale = flow.updateDraft(currentKey());
+    if (becameStale) {
+      panel?.setMessage("You changed the post. Check again before sharing.");
+    }
+    if (panel) {
+      panel.setStale(flow.lastResult() !== null && !flow.hasCurrentResult());
+      panel.setShareReady(flow.isShareAllowed(Date.now()));
+      panel.setBusy(flow.isChecking());
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // OCR (Person B's module; a stand-in until it exists)
+  // -------------------------------------------------------------------------
+
+  async function startOcr() {
+    const myTurn = ++ocrTurn;
+    const p = getPanel();
+    if (snapshot.unsupported || !snapshot.image) {
+      p.setImageText("", "Type any text you can see in the photo (signs, name tags, jerseys).");
+      return;
+    }
+    if (!options.ocr.available) {
+      p.setImageText("", "Automatic photo reading isn't available yet. Type any text you can see in the photo (signs, name tags, jerseys).");
+      return;
+    }
+    p.setImageText("", "Reading text from the photo on your computer…");
+    const blob = await readImageBlob(snapshot.image);
+    if (myTurn !== ocrTurn) return; // a newer photo was selected meanwhile
+    if (!blob) {
+      p.setImageText("", "Couldn't read this photo here. Type any text you can see in it.");
+      return;
+    }
+    try {
+      const result = await options.ocr.readImageText(blob, 1); // the Blob never leaves this tab
+      if (myTurn !== ocrTurn) return;
+      imageText = result.text;
+      p.setImageText(result.text, `Read from the photo (confidence ${Math.round(result.confidence)}%). Fix any mistakes before checking.`);
+      draftChanged();
+    } catch {
+      if (myTurn !== ocrTurn) return;
+      p.setImageText("", "Reading the photo failed. Type any text you can see in it.");
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Panel actions
+  // -------------------------------------------------------------------------
+
+  const actions: WarningPanelActions = {
+    onCheck() {
+      const p = getPanel();
+      if (!p.isOpen()) p.open("manual"); // keep the "Before you share" heading if Share opened it
+      void checkDraft();
+    },
+    onBack() {
+      flow.cancelShare();
+      const p = getPanel();
+      p.setShareReady(false);
+      p.close();
+      p.showLauncher(snapshot.step === "caption-step");
+      snapshot.editor?.focus();
+    },
+    onContinue() {
+      // Does NOT share. Only lets the user's next real click on Share through.
+      flow.allowNextShare(Date.now());
+      const p = getPanel();
+      p.setShareReady(flow.isShareAllowed(Date.now()));
+      p.setMessage(flow.hasCurrentResult() ? "" : "Not checked. Click Share when you're ready.");
+    },
+    onApplyEdit(edit) {
+      void applyEdit(edit);
+    },
+    onImageTextInput(text) {
+      imageText = text;
+      draftChanged();
+    },
+  };
+
+  async function checkDraft() {
+    snapshot = readComposer(document);
+    const p = getPanel();
+    if (snapshot.step !== "caption-step") {
+      p.setMessage("Open Instagram's caption step first.", "error");
+      return;
+    }
+    draftChanged();
+    const sources = currentSources();
+    if (!sources.some((s) => s.text.trim())) {
+      p.setMessage("Write a caption (or type the photo's text) first.", "error");
+      return;
+    }
+
+    const requestId = flow.startCheck();
+    if (requestId === null) return; // this exact draft is already being checked
+    p.setBusy(true);
+    p.setMessage("Checking your post…");
+
+    let reply: CheckDraftReply | { kind: "rejected"; reason: string } | undefined;
+    try {
+      const draftHash = await hashSources(sources);
+      const message: ExtensionMessage = { kind: "check-draft", requestId, draftHash, sources };
+      reply = await chrome.runtime.sendMessage(message);
+    } catch {
+      reply = { kind: "check-error", requestId, message: "Second Look was reloaded. Refresh this page and try again." };
+    }
+
+    if (!reply || reply.kind === "rejected") {
+      if (flow.receiveError(requestId) === "accepted") {
+        p.setMessage(reply ? reply.reason : "No answer from Second Look. Try again.", "error");
+      }
+    } else if (reply.kind === "check-error") {
+      if (flow.receiveError(reply.requestId) === "accepted") p.setMessage(reply.message, "error");
+    } else if (flow.receiveResult(reply.requestId, reply.result) === "accepted") {
+      p.showResult(reply.result, sources);
+      const n = reply.result.findings.length;
+      if (reply.result.droppedFindings > 0) {
+        p.setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${reply.result.droppedFindings} not shown.`, "error");
+      } else {
+        p.setMessage(n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`);
+      }
+    }
+    // An "outdated" reply is ignored on purpose: the draft changed while we waited.
+    draftChanged();
+  }
+
+  let applying = false; // so a double-click on Apply can't start two edits at once
+
+  /** "Apply" on a suggested edit: only if the caption still matches what was checked. */
+  async function applyEdit(edit: SuggestedEdit) {
+    if (applying) return;
+    const p = getPanel();
+    snapshot = readComposer(document); // read the caption as it is RIGHT NOW
+    if (snapshot.step !== "caption-step" || !snapshot.editor) {
+      p.setMessage("The caption box isn't open any more.", "error");
+      return;
+    }
+    if (!flow.canApplyEdit(currentKey())) {
+      p.setMessage("Your post changed since this check. Check again before applying suggestions.", "error");
+      draftChanged();
+      return;
+    }
+    const result = applyEditToText(snapshot.caption, edit);
+    if (!result.ok) {
+      p.setMessage(result.reason, "error");
+      return;
+    }
+    const captionBefore = snapshot.caption;
+    applying = true;
+    p.setMessage("Applying the change…");
+    let changed = false;
+    try {
+      changed = await writeCaption(snapshot.editor, result.text);
+    } finally {
+      applying = false;
+    }
+    if (changed) {
+      scan(); // the caption changed, so the result is now stale
+      p.setMessage("Change applied. Check again to see updated results.");
+      return;
+    } else {
+      // Instagram's editor didn't take the change. Never leave a half-edit
+      // silently: tell the user, and offer the text to paste themselves.
+      const copied = await navigator.clipboard.writeText(result.text).then(() => true, () => false);
+      const copyNote = copied ? " The suggested caption was copied; paste it in yourself." : "";
+      const nowText = readComposer(document).caption;
+      p.setMessage(
+        nowText === captionBefore
+          ? "Couldn't change Instagram's caption box." + copyNote
+          : "Couldn't apply this change cleanly, and your caption may have changed. Please check it." + copyNote,
+        "error",
+      );
+    }
+    scan(); // the caption changed, so the result is now stale
+  }
+
+  // -------------------------------------------------------------------------
+  // Share button interception
+  // -------------------------------------------------------------------------
+
+  /**
+   * Runs BEFORE Instagram sees any click (capture phase on window, added at
+   * document_start, so ours runs first). Stopping the event here means
+   * Instagram's own handler never runs.
+   */
+  function onPointerOrClick(event: Event) {
+    const shareButton = shareButtonFromEvent(event);
+    if (!shareButton) return;
+    // Only single-photo posts are handled; for others we don't get in the way.
+    if (readComposer(document).unsupported) return;
+
+    const now = Date.now();
+    if (event.type !== "click") {
+      // pointerdown/mousedown/etc.: block them unless the user chose to continue,
+      // in case Instagram reacts to them instead of "click".
+      if (!flow.isShareAllowed(now)) stop(event);
+      return;
+    }
+
+    const decision = flow.onShareClick(now);
+    if (decision === "allow") {
+      // The user's own click goes through to Instagram, untouched.
+      snapshot = readComposer(document);
+      sharedDraftHash = hashSources(currentSources());
+      const p = getPanel();
+      p.setShareReady(false);
+      p.close();
+      p.showLauncher(false);
+      return;
+    }
+    stop(event);
+    if (decision === "block") {
+      getPanel().setMessage("Your post is already being shared.", "error");
+      return;
+    }
+    // "intercept": show our choice instead.
+    scan();
+    const p = getPanel();
+    p.open("share-clicked");
+    p.setShareReady(false);
+    p.setMessage(flow.hasCurrentResult() ? "You checked this exact post. Continue, or go back to edit." : "");
+  }
+
+  /** Enter/Space on a focused Share button. */
+  function onKeyDown(event: KeyboardEvent) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (!shareButtonFromEvent(event) || readComposer(document).unsupported) return;
+    if (flow.isShareAllowed(Date.now())) return; // let it through; the click that follows decides
+    stop(event);
+    scan();
+    getPanel().open("share-clicked");
+  }
+
+  function stop(event: Event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "touchstart", "touchend", "click"]) {
+    // passive: false, or Chrome ignores preventDefault() on touch events.
+    window.addEventListener(type, onPointerOrClick, { capture: true, passive: false });
+  }
+  window.addEventListener("keydown", onKeyDown, { capture: true, passive: false });
+
+  // -------------------------------------------------------------------------
+  // After Share
+  // -------------------------------------------------------------------------
+
+  function watchPublishOutcome() {
+    const seen = detectPublishOutcome(document);
+    let outcome: PublishOutcome | null = null;
+    if (seen === "published") outcome = flow.finishPublishing("published");
+    else if (seen === "failed") outcome = flow.finishPublishing("failed");
+    // Closed without a confirmation or error: we can't tell what happened.
+    else if (seen === "closed") outcome = flow.finishPublishing("unknown");
+    else if (flow.publishTimedOut(Date.now())) outcome = flow.finishPublishing("unknown");
+    if (outcome) reportOutcome(outcome);
+  }
+
+  async function reportOutcome(outcome: PublishOutcome) {
+    console.info(`[Second Look] Share outcome: ${outcome}`);
+    if (outcome !== "published" || !sharedDraftHash) return; // only CONFIRMED posts count
+    const message: ExtensionMessage = {
+      kind: "post-published",
+      draftHash: await sharedDraftHash,
+      postId: null, // UNVERIFIED whether Instagram shows the new post's id; not read yet
+      publishedAt: new Date().toISOString(),
+    };
+    sharedDraftHash = null;
+    chrome.runtime.sendMessage(message).catch(() => undefined);
+  }
+
+  // -------------------------------------------------------------------------
+  // The popup's "Use draft from Instagram tab"
+  // -------------------------------------------------------------------------
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Only our own popup (an extension page, not a tab) may ask.
+    if (sender.id !== chrome.runtime.id || sender.tab) return false;
+    if ((message as ExtensionMessage | null)?.kind !== "get-instagram-draft") return false;
+    snapshot = readComposer(document);
+    const reply: InstagramDraftReply = {
+      kind: "instagram-draft",
+      found: snapshot.step === "caption-step",
+      caption: snapshot.step === "caption-step" ? snapshot.caption : "",
+      imageText: snapshot.step === "caption-step" ? imageText : "",
+    };
+    sendResponse(reply);
+    return false;
+  });
+
+  // -------------------------------------------------------------------------
+  // Watching the page
+  // -------------------------------------------------------------------------
+
+  let scanTimer: number | undefined;
+  function scheduleScan() {
+    if (scanTimer !== undefined) return;
+    scanTimer = window.setTimeout(() => {
+      scanTimer = undefined;
+      scan();
+    }, 150);
+  }
+  new MutationObserver(scheduleScan).observe(document, { childList: true, subtree: true, characterData: true });
+  document.addEventListener("input", scheduleScan, true);
+  // Also check now and then, so a share that never gets an answer times out.
+  window.setInterval(() => flow.isPublishing() && scan(), 2000);
+}
+
+startInstagramIntegration({ ocr: unavailableOcr, createPanel: createOverlayPanel });

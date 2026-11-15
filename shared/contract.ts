@@ -192,3 +192,49 @@ export interface HealthResponse {
   contractVersion: typeof CONTRACT_VERSION;
   databricks: DatabricksStatus;
 }
+
+// ---------------------------------------------------------------------------
+// Inside the extension only (never sent over the network).
+// Added for milestone 4 (Instagram). These are ADDITIVE: the HTTP request and
+// response above are unchanged, so CONTRACT_VERSION stays the same.
+// ---------------------------------------------------------------------------
+
+/**
+ * OCR -> warning interface (docs/TEAM.md section B).
+ * Text read from one image ON THE USER'S COMPUTER. The image is never uploaded.
+ */
+export interface OcrResult {
+  sourceId: string;   // "image_text:<index>"
+  text: string;       // the user can edit this before checking
+  confidence: number; // 0-100 from the OCR engine, shown as a hint
+}
+
+/**
+ * Chrome messages between the Instagram content script, the service worker
+ * and the popup (docs/TEAM.md section C). Only text: never images, image
+ * URLs, blob: URLs or page HTML.
+ *
+ *  - "check-draft":         content script -> service worker. The worker calls
+ *                           POST /api/analyze and replies with a CheckDraftReply.
+ *  - "post-published":      content script -> service worker, ONLY after the
+ *                           page showed a confirmed publication (not on cancel,
+ *                           failure or "unknown").
+ *  - "get-instagram-draft": popup -> content script. Reply: InstagramDraftReply.
+ */
+export type ExtensionMessage =
+  | { kind: "check-draft"; requestId: number; draftHash: string; sources: TextSource[] }
+  | { kind: "post-published"; draftHash: string; postId: string | null; publishedAt: string }
+  | { kind: "get-instagram-draft" };
+
+/** Reply to "check-draft". `requestId` is echoed so old replies can be ignored. */
+export type CheckDraftReply =
+  | { kind: "check-result"; requestId: number; result: AnalyzeResponse }
+  | { kind: "check-error"; requestId: number; message: string };
+
+/** Reply to "get-instagram-draft". `found` is false when no composer is open. */
+export interface InstagramDraftReply {
+  kind: "instagram-draft";
+  found: boolean;
+  caption: string;
+  imageText: string;
+}

@@ -8,8 +8,8 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 - Mock mode is tested: typechecks, extension build, `npm test` regression tests in both packages, and manual `curl` checks of `/api/health` and `/api/analyze`.
 - Databricks integration is written and unit-tested with a fake `fetch`, but has **not** passed a live credentialed test. Treat it as unverified until `npm run check:databricks` prints `Success. Connection verified.` against a real workspace. "Configured" (settings filled in) is not "verified".
 - Team ownership and the interfaces between areas are in `docs/TEAM.md`.
-- Instagram interception, automatic image OCR, historical storage, and cross-post
-  reasoning are future milestones unless subsequent code and tests establish otherwise.
+- Milestone 4 (Instagram, single-photo posts, English UI) is in code: content script in `extension/src/content/`, service worker in `extension/src/background.ts`. Blocking Share, the panel, stale detection and "Apply" were checked by hand on the live site; letting a share through and detecting "published" were NOT (they need a real post). Details in `docs/ROADMAP.md`.
+- Automatic image OCR, historical storage, and cross-post reasoning are future milestones. Their interfaces exist in `extension/src/ports.ts` with stand-ins (`unavailableOcr`, `noHistory`).
 - Implement only the milestone assigned in the current task.
 - Preserve the existing working structure; do not reorganize it without a concrete need.
 
@@ -53,6 +53,14 @@ extension/src/popup.ts        Popup wiring, draft hashing, stale detection, appl
 extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
+extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend
+extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
+extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
+extension/src/ports.ts        Interfaces + stand-ins for OCR, the warning panel, history
+extension/src/content/main.ts           Instagram content script: wires everything together
+extension/src/content/instagram-adapter.ts  ALL Instagram page details (selectors, caption writing)
+extension/src/content/share-flow.ts     Stale/outdated/Share-permission rules (no DOM; tested)
+extension/src/content/overlay.ts        Warning panel on instagram.com (Shadow DOM, reuses render.ts)
 backend/test/, extension/test/  Regression tests (node:test, run with `npm test`)
 docs/ROADMAP.md               Next milestones, history storage plan, Instagram assumptions
 docs/TEAM.md                  Module owners and integration interfaces (in code vs. proposed)
@@ -94,6 +102,9 @@ curl http://127.0.0.1:8787/api/health     # shows mode and databricks.state
 - `shared/package.json` sets `"type": "module"`; keep it, or the backend can't import the contract.
 - Run both `typecheck` and both `npm test` commands, and the extension build, before committing.
 - When you fix a bug, add a test for it in `backend/test/` or `extension/test/`.
+- Instagram page details (selectors, button text, how to write the caption) belong ONLY in `extension/src/content/instagram-adapter.ts`.
+- The extension must never click Share or publish on its own. "Continue" may only let the user's own next click through.
+- After reloading the extension in `chrome://extensions`, refresh the Instagram tab: the old content script stops working.
 
 
 # Git & Repository Safety Rules

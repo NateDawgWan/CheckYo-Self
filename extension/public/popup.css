@@ -100,7 +100,7 @@ textarea {
   font: 14px/1.5 var(--page-font);
 }
 
-.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 
 button {
   font: inherit;
