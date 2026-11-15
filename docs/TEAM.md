@@ -43,7 +43,7 @@ What each side can rely on (see the comments in `shared/contract.ts`):
 - `SuggestedEdit` with `replace` / `generalize` always has non-blank `replacement`; edits that break the rules arrive as `other` (advice only). The extension still re-checks with `extension/src/edits.ts` before applying.
 - `HealthResponse.databricks.state` is `"verified"` only after a real call succeeded. Settings alone give `"configured_unverified"`.
 
-### B. OCR → warning interface (owners 3 and 2) — **in code** (OCR module), popup and Instagram wiring **not done yet**, milestone 2
+### B. OCR → warning interface (owners 3 and 2) — **in code**: OCR module, popup ("Add a photo") and Instagram panel (offscreen page), milestone 2
 
 OCR runs inside the extension and produces ordinary `TextSource` objects, so the backend needs no change. Full details, integration steps and limitations: `extension/src/ocr/README.md`.
 
@@ -63,7 +63,7 @@ export function imageBoxesToPreview(boxes: OcrBox[], layout: PreviewLayout): Pre
 - The OCR types live in `extension/src/ocr/types.ts`, **not** in `shared/contract.ts` as first proposed. They never cross the network or a Chrome message, and keeping boxes and image sizes out of the shared file means the backend can't start accepting them by accident. What crosses the network is the existing `TextSource`.
 - The popup shows the OCR text in the existing "Text in the photo" box for the user to correct, then sends it as `{ id: "image_text:<n>", type: "image_text", text }`.
 - Manifest V3 forbids remote code: the engine worker, WASM cores and English data are bundled into `dist/ocr/` by `extension/build.mjs`. The extension-page CSP with `'wasm-unsafe-eval'` is now in `manifest.json`.
-- **Instagram (owner 4):** the Instagram panel calls OCR through `OcrPort` in `extension/src/ports.ts`, which has the same shape as `readImageText()` and returns this `OcrResult`. The OCR worker can't start inside a content script, so connecting it means running OCR in an offscreen extension page and passing the photo there (never over the network). Until then Instagram uses the stand-in `unavailableOcr`, and the user types the photo's text.
+- **Instagram (owner 4):** the Instagram panel calls OCR through `OcrPort` in `extension/src/ports.ts`, which has the same shape as `readImageText()` and returns this `OcrResult`. The OCR worker can't start inside a content script, so Instagram uses `offscreenOcr` (`content/offscreen-ocr.ts`): the photo is passed inside the browser to the offscreen page `offscreen.html` (`src/offscreen.ts`), which runs `readImageText()`. The relay messages are in `src/ocr-relay.ts`, deliberately **not** in `shared/contract.ts`: they carry image data, which must never reach the backend. Reading the photo sends nothing for analysis; the user reviews the text and clicks "Check this post" first.
 
 ### C. Instagram page → extension (owners 4 and 2) — **in code**, milestone 4
 
@@ -117,7 +117,7 @@ POST   /api/analyze  { ..., historyPostIds: [...] } -> AnalyzeResponse with hist
 
 - **Live Databricks analysis** passed with real credentials on 2026-11-14 (`npm run check:databricks` printed `Success. Connection verified.`). Re-run it after any app or credential change. Results go in `docs/TEST_RESULTS.md`.
 - **Databricks history storage** passed `npm run check:history` on 2026-11-14 (import, list, revoke). A live analysis with history (and saving its AI interpretations) also passed, and now takes about 8–9 s (interpretations are saved after the reply). Import and delete take about 10–12 s each. Set `HISTORY_STORE=databricks-app` to use it; the default `dev-memory` is temporary.
-- The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **neither the popup nor the Instagram panel uses it yet**.
+- The OCR module (`extension/src/ocr/`) is used by the popup ("Add a photo", run in the popup itself) and by the Instagram panel (through the offscreen page). The popup path was run in headless Chrome with the built extension and the live backend on 2026-11-15: OCR text was checked and quoted by the model. The Instagram path is not yet tried on the live site.
 - Instagram integration covers single-photo posts in English only. Blocking Share, letting a share through after "Continue", detecting "published", and staying out of the way for 2-photo posts are verified on the live site (2026-11-15, mock backend). Failure screens and video posts are **not**. See `docs/ROADMAP.md`.
 - The extension's history screen is not implemented, and the extension doesn't call the history API yet (`noHistory` stand-in in `ports.ts`).
 - The popup has only been checked through its code and automated tests, not by clicking through it in Chrome.

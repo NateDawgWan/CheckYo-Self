@@ -2,7 +2,7 @@
 
 A Chrome extension that shows what an Instagram post could reveal about you before you share it, including things that only become revealing when combined with your earlier posts. Built for MadHacks 2026.
 
-**Status: milestones 1 and 4.** The popup sends a caption (and optional, hand-typed photo text) to a small local backend, which asks a Databricks-hosted LLM for structured privacy findings and shows them, linked to the exact text they're based on. On instagram.com, the same check is offered before you share a single-photo post. OCR and post history come next (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+**Status: milestones 1 and 4.** The popup sends a caption and the text in the photo (read on your computer with local OCR when you add a photo, or typed) to a small local backend, which asks a Databricks-hosted LLM for structured privacy findings and shows them, linked to the exact text they're based on. On instagram.com, the same check is offered before you share a single-photo post. Post history in the extension comes next (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## What you need
 
@@ -38,6 +38,19 @@ Load the extension in Chrome:
 After changing extension code, rebuild (or leave `npm run watch` running) and click the reload icon on the extension's card in `chrome://extensions`.
 
 Tip: the popup closes when you click elsewhere. While developing, open it in a normal tab instead: `chrome-extension://<your-extension-id>/popup.html` (the ID is on its card in `chrome://extensions`). You can then right-click and Inspect it like any page.
+
+### Windows: keep the backend running without a terminal
+
+Double-click these files in `scripts\windows\` (needs Node.js and a filled-in `backend\.env`):
+
+| File | What it does |
+|---|---|
+| `install-autostart.cmd` | Starts the backend now, hidden, and again every time you sign in to Windows. It adds one shortcut to your own Startup folder (no admin rights). |
+| `uninstall-autostart.cmd` | Removes that shortcut and stops the backend. |
+| `start-backend.cmd` | Starts it once (does nothing if it's already running). Installs the packages on first run. |
+| `stop-backend.cmd` | Stops it until the next sign-in. |
+
+The backend's output goes to `backend\backend.log` (ids, statuses and counts only; it's never committed). It runs the code that is checked out in this folder: after `git pull` or switching branches, run `stop-backend.cmd` then `start-backend.cmd`. If you move the project folder, run `install-autostart.cmd` again. Port 8787 is then taken, so stop it before using `npm run dev`.
 
 ## Practice (mock) mode vs. real Databricks
 

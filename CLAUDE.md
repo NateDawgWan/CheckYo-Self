@@ -8,8 +8,8 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 - Mock mode is tested: typechecks, extension build, `npm test` regression tests in both packages, and manual `curl` checks of `/api/health` and `/api/analyze`.
 - Databricks: the backend calls the Databricks App `instagram-risk-analyzer` (maintained by Genie, outside this repo), which relays to the hosted model. The connector supports OAuth service-principal tokens (default) and PATs. **Live analysis verified 2026-11-14** (OAuth M2M, `/api/v1/serving-endpoints/{endpoint}/invocations`): `npm run check:databricks` passed and a synthetic `/api/analyze` returned verified findings. Re-run the check after any app or credential change; only a passing check counts. Token calls must use `/api/` routes; the service principal needs Workspace access and Can Use on the app. See `docs/DATABRICKS_APP_API.md`.
 - History (milestone 3, backend side): explicit import of approved, published posts; relevance suggestions (`/api/history/suggest`) to pre-select posts on the consent step; analysis with exactly the user-chosen posts (`historyPostIds`); per-user isolation; deletion and approval revocation; AI interpretations stored apart from observed posts. Storage: the **temporary in-memory dev store** (`HISTORY_STORE=dev-memory`, lost on restart) by default, or the Databricks App store (`databricks-app`), whose import/list/revoke passed `npm run check:history` on 2026-11-14 (analysis with history and interpretation storage also passed live; an analysis with history takes about 8–9 s; interpretations are saved after the reply). The app's source snapshot is in `databricks-app/` (backup only; Genie deploys). No extension UI for history yet.
-- Milestone 2 (in progress): local OCR module in `extension/src/ocr/` (Tesseract.js, bundled; unit tests, `npm run check:ocr`, and a local test page). Not yet wired into the popup or the Instagram panel, and not yet run inside the loaded extension.
-- Milestone 4 (Instagram, single-photo posts, English UI) is in code: content script in `extension/src/content/`, service worker in `extension/src/background.ts`. Blocking Share, the panel, stale detection, "Apply", letting a share through after "Continue", detecting "published", and ignoring 2-photo posts were checked by hand on the live site (2026-11-15, mock backend). Failure screens and video posts were NOT. Details in `docs/ROADMAP.md`. The Instagram code reaches OCR and history through `extension/src/ports.ts` with stand-ins (`unavailableOcr`, `noHistory`); the backend history API above is not connected to the extension yet.
+- Milestone 2 (in progress): local OCR module in `extension/src/ocr/` (Tesseract.js, bundled; unit tests, `npm run check:ocr`, and a local test page). Wired into the Instagram panel through an offscreen page (`offscreen.html`, `src/offscreen.ts`, `src/ocr-relay.ts`, `src/content/offscreen-ocr.ts`): the selected photo is grabbed from the composer and read locally; the text is analyzed only after the user clicks "Check this post". Verified in the loaded extension in Chrome against a local stand-in composer page (2026-11-15), **not yet on the live Instagram site**. Also wired into the popup: "Add a photo" runs `readImageText()` directly in the popup (an extension page), applies the same size limit and quality notices (`describePhotoRead()` in `src/photo-text.ts`), and fills "Text in the photo" for review. Verified in headless Chrome with the built extension and the live backend (2026-11-15). No photo highlights in the popup yet.
+- Milestone 4 (Instagram, single-photo posts, English UI) is in code: content script in `extension/src/content/`, service worker in `extension/src/background.ts`. Blocking Share, the panel, stale detection, "Apply", letting a share through after "Continue", detecting "published", and ignoring 2-photo posts were checked by hand on the live site (2026-11-15, mock backend). Failure screens and video posts were NOT. Details in `docs/ROADMAP.md`. The Instagram code reaches OCR and history through `extension/src/ports.ts`: OCR uses `offscreenOcr`; history still uses the stand-in `noHistory`, so the backend history API above is not connected to the extension yet.
 - Live vs. mock results: `docs/TEST_RESULTS.md`. Team ownership and interfaces: `docs/TEAM.md`.
 - Implement only the milestone assigned in the current task.
 - Preserve the existing working structure; do not reorganize it without a concrete need.
@@ -29,6 +29,7 @@ Chrome extension (TypeScript, MV3)        Backend (Node + Express, TypeScript)  
 - History requests carry the `X-Second-Look-User` header (a random per-install id). Every store method is per user; never read or delete across users.
 - Only text crosses the network: never images, image URLs, base64, or page HTML. `backend/src/validate.ts` enforces this.
 - `shared/contract.ts` is the single source of truth for the request/response format. Both sides import it. Change it first, then fix the type errors on both sides. Bump `CONTRACT_VERSION` on breaking changes.
+- Unreliable OCR is never used: when `describePhotoRead()` rates a read "poor" (low average confidence, or most words unclear, e.g. a photo of a building), the photo-text box stays empty and the user is told; guessed letters are never sent to the AI. Noisy but mostly readable reads are filled in with a notice.
 - Observed vs. AI-generated: `Evidence` (quote + `verified`) is observed text; `exposure`, `uncertainty`, `suggestedEdits` are AI interpretation. The backend, not the model, sets `verified` and `crossSource`.
 - Evidence verification (`backend/src/parse.ts`):
   - `verified: true` means the quote appears in the named source's text (case- and whitespace-insensitive). It proves the text exists, not that the AI's interpretation is right.
@@ -58,14 +59,18 @@ backend/src/history/          store.ts (interface), memoryStore.ts (TEMPORARY de
                               appStore.ts (Databricks App store, unverified), relevance.ts
 backend/scripts/ping-databricks.ts   Live connection check (npm run check:databricks)
 backend/scripts/check-history.ts     Live history round trip (npm run check:history)
-extension/public/             manifest.json, popup.html, popup.css (copied to dist/)
+extension/public/             manifest.json, popup.html, popup.css ("Street Poster" design, also used by the Instagram panel), fonts.css + fonts/ (bundled Anton, Permanent Marker; licenses in fonts/) (copied to dist/)
 extension/src/popup.ts        Popup wiring, draft hashing, stale detection, apply-edit
 extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
 extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
 extension/src/dashboard/      Full-page dashboard (public/dashboard.html, opened as the extension's Options page): scores, cross-post view, offline keyword-rule mode
-extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend
+extension/src/verdict.ts      Popup verdict: risk score, LOW/MEDIUM/HIGH stamp, "Before you drop that post" advice (display only; reuses dashboard/report.ts scoring)
+extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
+extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
+extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo
+extension/src/photo-text.ts   Photo-text rules (popup + Instagram): unreliable reads are discarded (empty box + notice), noisy reads get a notice, strict 1000-char limit (tested)
 extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
 extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
 extension/src/ports.ts        Interfaces + stand-ins for OCR, the warning panel, history
@@ -73,6 +78,7 @@ extension/src/content/main.ts           Instagram content script: wires everythi
 extension/src/content/instagram-adapter.ts  ALL Instagram page details (selectors, caption writing)
 extension/src/content/share-flow.ts     Stale/outdated/Share-permission rules (no DOM; tested)
 extension/src/content/overlay.ts        Warning panel on instagram.com (Shadow DOM, reuses render.ts)
+extension/src/content/offscreen-ocr.ts  OcrPort for Instagram: sends the photo to the offscreen OCR page
 extension/dev/instagram-test-kit.js     Paste into Chrome's Console to inspect/record Instagram's page (dev only)
 databricks-app/               Snapshot of Genie's Databricks App (backup; deploys happen in Databricks)
 backend/test/, extension/test/  Regression tests (node:test, run with `npm test`)

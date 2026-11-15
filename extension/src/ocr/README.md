@@ -64,9 +64,9 @@ else if (out.reason === "too_long") showError(out.message); // "empty" = just le
 
 **Evidence ids.** Words are `image_text:<n>#w<k>` and lines `image_text:<n>#l<k>`, numbered in reading order. The same image and engine version always give the same ids. They identify OCR evidence inside the extension. The backend only sees the `image_text:<n>` source id and quotes.
 
-## Integration instructions for the popup owner (owner 2)
+## Popup integration (done)
 
-This PR does **not** touch `popup.ts`, `render.ts`, `popup.html` or `popup.css`. Here is what to add there. `demo/demo.ts` is a complete working example of every step.
+**Status:** steps 1-3 and 5 below are done: the popup has "Add a photo" (`popup.ts`, `popup.html`), with progress, Stop reading, Remove photo, the 1000-character limit and the quality notices from `describePhotoRead()` in `src/photo-text.ts`. Step 4 (highlights on the photo preview) is not done yet. The original instructions are kept below for reference. `demo/demo.ts` is a complete working example of every step.
 
 1. **`popup.html`**: next to the existing "Text in the photo" textarea (`#image-text`), add:
    - `<input type="file" id="photo" accept="image/*">`
@@ -117,7 +117,7 @@ npm run build       # copies the engine into dist/ocr/ (adds ~15 MB to dist/)
 - **Scanned image vs. Instagram's final image.** We scan the file the user picks. Instagram may then crop it (e.g. to 1:1 or 4:5), resize and compress it, apply filters, or let the user add text and stickers in its editor. Text added in Instagram is not in our file, and text cropped away by Instagram may still be in our scan. Whether the final edited image can be read from the page is unverified (`docs/ROADMAP.md`, assumption 4).
 - **Language.** English only (`eng`, 4.0.0 best_int). Other scripts need more language files, each about 1-10 MB.
 - **Size and speed.** About 1-3 seconds per image on the test machine. One engine is started per scan and stopped afterwards. Very large images are refused (`OCR_LIMITS`), not scaled down.
-- **Content script (milestone 4).** A content script on instagram.com can't start this worker directly: the worker must be same-origin with the page. Run OCR in an extension page instead (the popup, or an offscreen document with the `offscreen` permission) and pass the image there. That design is not built or tested yet.
+- **Content script (milestone 4).** A content script on instagram.com can't start this worker directly: the worker must be same-origin with the page. Run OCR in an extension page instead and pass the image there. For Instagram this is now built: `offscreen.html` / `src/offscreen.ts` runs `readImageText()`, and `src/ocr-relay.ts` passes the photo to it inside the browser. It's tested end to end in Chrome against a local stand-in page, not yet on the live site.
 - **If loading fails early** (missing language file), Tesseract.js doesn't hand back its worker, so that idle worker stays until the page closes. The popup closes often, so this is minor.
 
 ## Upgrading Tesseract.js

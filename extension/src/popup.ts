@@ -1,6 +1,7 @@
-// Popup logic for milestone 1: type a caption (and optional photo text),
-// send it to the backend, show the findings, and mark them out of date
-// as soon as the draft changes.
+// Popup logic: type a caption, add photo text (typed, or read from a photo
+// ON THIS COMPUTER with the local OCR module), send the TEXT to the backend,
+// show the findings, and mark them out of date as soon as the draft changes.
+// The photo itself is never sent anywhere.
 import type {
   AnalyzeResponse,
   ExtensionMessage,
@@ -10,7 +11,10 @@ import type {
 } from "../../shared/contract";
 import { analyzeDraft, checkHealth, describeBackendStatus, hashSources } from "./api";
 import { applyEditToText } from "./edits";
+import { OcrError, readImageText } from "./ocr";
+import { describePhotoRead, photoProgressLabel, PHOTO_TEXT_MAX_CHARS, type PhotoReadNotice } from "./photo-text";
 import { renderResults, type ResultElements } from "./render";
+import { renderVerdict, type VerdictElements } from "./verdict";
 
 const SAMPLE_CAPTION =
   "Back at Lincoln Park Elementary pickup again 🙃 same 3:15 chaos every weekday. " +
@@ -32,6 +36,14 @@ const instagramButton = byId<HTMLButtonElement>("load-instagram");
 const message = byId<HTMLParagraphElement>("message");
 const statusPill = byId<HTMLSpanElement>("backend-status");
 const staleBanner = byId<HTMLDivElement>("stale-banner");
+const photoInput = byId<HTMLInputElement>("photo");
+const photoCancelButton = byId<HTMLButtonElement>("photo-cancel");
+const photoRemoveButton = byId<HTMLButtonElement>("photo-remove");
+const photoPreviewWrap = byId<HTMLDivElement>("photo-preview-wrap");
+const photoPreview = byId<HTMLImageElement>("photo-preview");
+const photoProgress = byId<HTMLProgressElement>("photo-progress");
+const photoStatus = byId<HTMLParagraphElement>("photo-status");
+const photoNotices = byId<HTMLDivElement>("photo-notices");
 const resultEls: ResultElements = {
   root: byId("results"),
   summary: byId("summary"),
@@ -40,6 +52,16 @@ const resultEls: ResultElements = {
   meta: byId("meta"),
   mockBanner: byId("mock-banner"),
   incompleteBanner: byId("incomplete-banner"),
+};
+// Score, LOW/MEDIUM/HIGH stamp and advice cards (display only, see verdict.ts).
+const verdictEls: VerdictElements = {
+  root: byId("verdict"),
+  score: byId("verdict-score"),
+  stamp: byId("verdict-stamp"),
+  headline: byId("verdict-headline"),
+  note: byId("verdict-note"),
+  advice: byId("advice"),
+  adviceList: byId("advice-list"),
 };
 
 /** The last result we showed, plus the exact text it was about. */
@@ -71,7 +93,114 @@ async function updateStaleness() {
   resultEls.root.classList.toggle("is-stale", stale);
 }
 
+// ---------------------------------------------------------------------------
+// "Add a photo": read its text on this computer (local OCR, src/ocr)
+// ---------------------------------------------------------------------------
+
+let currentScan: AbortController | null = null; // the photo being read, if any
+let previewUrl: string | null = null;            // local blob: URL for the preview (never uploaded)
+let ocrFilledText: string | null = null;         // the text OCR last put in the box
+let typedDuringScan = false;                     // the user typed while reading: keep their text
+
+function setPhotoStatus(text: string, kind: "info" | "error" = "info") {
+  photoStatus.textContent = text;
+  photoStatus.dataset.kind = kind;
+}
+
+/** Notices quote words read from the photo, so they are set with textContent only. */
+function showPhotoNotices(notices: PhotoReadNotice[]) {
+  photoNotices.replaceChildren(
+    ...notices.map((n) => {
+      const p = document.createElement("p");
+      p.className = n.kind === "poor" ? "banner banner-incomplete" : "banner banner-stale";
+      p.textContent = n.text;
+      return p;
+    }),
+  );
+}
+
+function setImageText(text: string) {
+  imageTextInput.value = text;
+  imageTextInput.dispatchEvent(new Event("input")); // results may now be stale
+}
+
+async function readPhoto(file: File) {
+  currentScan?.abort(); // only the newest photo matters
+  const scan = new AbortController();
+  currentScan = scan;
+  typedDuringScan = false;
+
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(file);
+  photoPreview.src = previewUrl;
+  photoPreviewWrap.hidden = false;
+  photoRemoveButton.hidden = false;
+  photoCancelButton.hidden = false;
+  photoProgress.hidden = false;
+  photoProgress.value = 0;
+  showPhotoNotices([]);
+  setPhotoStatus("Reading the photo on this computer… (nothing is sent yet)");
+
+  try {
+    const result = await readImageText(file, 1, {
+      signal: scan.signal,
+      onProgress: (p) => {
+        photoProgress.value = p.fraction;
+        setPhotoStatus(photoProgressLabel(p.stage, p.fraction));
+      },
+    });
+    if (currentScan !== scan) return; // a newer photo was picked meanwhile
+    const view = describePhotoRead(result);
+    showPhotoNotices(view.notices);
+    if (typedDuringScan) {
+      setPhotoStatus(`${view.hint} You typed the photo text while it was being read, so yours was kept.`);
+    } else {
+      ocrFilledText = view.text;
+      setImageText(view.text);
+      setPhotoStatus(view.hint);
+    }
+  } catch (err) {
+    if (currentScan !== scan) return;
+    // OCR errors carry a readable message. A failure is never treated as "no text".
+    if (err instanceof OcrError && err.code === "CANCELLED") {
+      setPhotoStatus("Stopped reading the photo. Type any text you can see in it.");
+    } else {
+      const reason = err instanceof Error ? ` ${err.message}` : "";
+      setPhotoStatus(`Reading the photo failed.${reason} Type any text you can see in it.`, "error");
+    }
+  } finally {
+    if (currentScan === scan) {
+      currentScan = null;
+      photoCancelButton.hidden = true;
+      photoProgress.hidden = true;
+    }
+  }
+}
+
+/** Forget the photo. Its text is cleared too, unless the user has edited it. */
+function removePhoto() {
+  currentScan?.abort();
+  currentScan = null;
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = null;
+  photoPreview.removeAttribute("src");
+  photoPreviewWrap.hidden = true;
+  photoRemoveButton.hidden = true;
+  photoCancelButton.hidden = true;
+  photoProgress.hidden = true;
+  photoInput.value = "";
+  showPhotoNotices([]);
+  setPhotoStatus("");
+  if (ocrFilledText !== null && imageTextInput.value === ocrFilledText) setImageText("");
+  ocrFilledText = null;
+}
+
 async function analyze() {
+  if (currentScan) {
+    // Don't send a draft without the photo text the user hasn't seen yet.
+    setMessage("Still reading the photo. Check again once its text appears above.", "error");
+    return;
+  }
   const sources = collectSources();
   if (!sources.some((s) => s.text.trim())) {
     setMessage("Write a caption first.", "error");
@@ -86,6 +215,7 @@ async function analyze() {
     const result = await analyzeDraft(sources, draftHash);
     lastResult = result;
     renderResults(resultEls, result, sources, applyEdit);
+    renderVerdict(verdictEls, result, sources);
     const n = result.findings.length;
     if (result.droppedFindings > 0) {
       // Some warnings could not be checked, so don't call this "complete".
@@ -155,6 +285,7 @@ async function loadInstagramDraft() {
     setMessage(notFound + " (If it is open, refresh the Instagram page.)", "error");
     return;
   }
+  removePhoto(); // the Instagram draft replaces any photo picked here
   captionInput.value = reply.caption;
   imageTextInput.value = reply.imageText;
   captionInput.dispatchEvent(new Event("input"));
@@ -162,10 +293,22 @@ async function loadInstagramDraft() {
 }
 
 captionInput.addEventListener("input", updateStaleness);
-imageTextInput.addEventListener("input", updateStaleness);
+imageTextInput.maxLength = PHOTO_TEXT_MAX_CHARS; // same strict limit as OCR text
+imageTextInput.addEventListener("input", (event) => {
+  if (event.isTrusted && currentScan) typedDuringScan = true; // a real keystroke, not our own update
+  updateStaleness();
+});
+photoInput.addEventListener("change", () => {
+  const file = photoInput.files?.[0];
+  if (file) void readPhoto(file);
+});
+photoCancelButton.addEventListener("click", () => currentScan?.abort());
+photoRemoveButton.addEventListener("click", removePhoto);
+window.addEventListener("pagehide", () => currentScan?.abort()); // popup closed: stop reading
 analyzeButton.addEventListener("click", analyze);
 reanalyzeButton.addEventListener("click", analyze);
 sampleButton.addEventListener("click", () => {
+  removePhoto(); // the sample has its own photo text
   captionInput.value = SAMPLE_CAPTION;
   imageTextInput.value = SAMPLE_IMAGE_TEXT;
   captionInput.dispatchEvent(new Event("input"));
