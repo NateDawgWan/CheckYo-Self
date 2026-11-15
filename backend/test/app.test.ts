@@ -71,13 +71,17 @@ function importBody(posts: any[], approvedIds = posts.map((p) => p.postId)) {
   return { contractVersion: CONTRACT_VERSION, approval: { approved: true, postIds: approvedIds }, posts };
 }
 
-function analyzeBody(caption: string, includeHistory = false) {
+function analyzeBody(caption: string, historyPostIds?: string[]) {
   return {
     contractVersion: CONTRACT_VERSION,
     draftHash: HASH,
     sources: [{ id: "caption", type: "caption", text: caption }],
-    ...(includeHistory ? { includeHistory: true } : {}),
+    ...(historyPostIds ? { historyPostIds } : {}),
   };
+}
+
+function suggestBody(caption: string) {
+  return { contractVersion: CONTRACT_VERSION, sources: [{ id: "caption", type: "caption", text: caption }] };
 }
 
 // --- Approval and drafts ------------------------------------------------------------
@@ -130,9 +134,18 @@ test("one user can never see, use or delete another user's history", async () =>
   // Listing
   assert.deepEqual((await call("GET", "/api/history", BOB)).body.posts.map((p: any) => p.postId), ["bob-1"]);
 
-  // Analysis: Bob's request must not pull in Alice's post
-  await call("POST", "/api/analyze", BOB, analyzeBody("Maple Street again", true));
+  // Analysis: Bob can use his own post, but naming Alice's post id is refused
+  await call("POST", "/api/analyze", BOB, analyzeBody("Maple Street again", ["bob-1"]));
   assert.deepEqual(lastSources.map((s) => s.id), ["caption", "history:bob-1"]);
+  lastSources = [];
+  const stolen = await call("POST", "/api/analyze", BOB, analyzeBody("Maple Street again", ["shared-id"]));
+  assert.equal(stolen.status, 400);
+  assert.match(stolen.body.error.message, /not in your approved history/);
+  assert.deepEqual(lastSources, [], "nothing was analyzed");
+
+  // Suggestions only ever list the caller's own posts
+  const suggested = await call("POST", "/api/history/suggest", BOB, suggestBody("Maple Street again"));
+  assert.deepEqual(suggested.body.suggestions.map((s: any) => s.postId), ["bob-1"]);
 
   // Deleting / revoking with Alice's ids as Bob does nothing to Alice
   assert.equal((await call("DELETE", "/api/history/posts/shared-id", BOB)).status, 404);
@@ -169,7 +182,7 @@ test("revoking an approval deletes its posts and the AI interpretations derived 
       }),
       sources,
     );
-  const analysis = await call("POST", "/api/analyze", ALICE, analyzeBody("Same pickup at Lincoln Elementary", true));
+  const analysis = await call("POST", "/api/analyze", ALICE, analyzeBody("Same pickup at Lincoln Elementary", ["p1", "p2"]));
   assert.equal(analysis.status, 200);
   assert.equal(analysis.body.findings[0].crossSource, true);
   assert.ok(analysis.body.historyUsed.some((h: any) => h.postId === "p1"));
@@ -186,6 +199,10 @@ test("revoking an approval deletes its posts and the AI interpretations derived 
     { posts: 1, interpretations: 1 },
   );
   assert.deepEqual((await call("GET", "/api/history", ALICE)).body.posts.map((p: any) => p.postId), ["p2"]);
+
+  // A consent screen opened before the revoke still lists p1: that check is refused.
+  const afterRevoke = await call("POST", "/api/analyze", ALICE, analyzeBody("Same pickup", ["p1", "p2"]));
+  assert.equal(afterRevoke.status, 400);
 });
 
 test("deleting one post, then everything", async () => {
@@ -198,24 +215,55 @@ test("deleting one post, then everything", async () => {
 
 // --- History in analysis -------------------------------------------------------------
 
-test("analysis includes relevant approved history with ids and dates only when asked", async () => {
+test("suggest ranks approved posts for pre-selection and analyzes nothing", async () => {
   await call("POST", "/api/history/import", ALICE, importBody([
     post("old-beach", "Beach day", "2025-06-01T10:00:00Z"),
     post("soccer", "Riverside soccer practice", "2026-09-01T10:00:00Z"),
   ]));
-
-  await call("POST", "/api/analyze", ALICE, analyzeBody("Riverside soccer again"));
-  assert.deepEqual(lastSources.map((s) => s.id), ["caption"], "no history unless includeHistory");
-
-  const res = await call("POST", "/api/analyze", ALICE, analyzeBody("Riverside soccer again", true));
-  assert.equal(lastSources[1].id, "history:soccer", "the post sharing words comes first");
-  assert.equal(lastSources[1].type, "history");
-  assert.equal(lastSources[1].date, "2026-09-01T10:00:00.000Z");
-  assert.deepEqual(res.body.historyUsed[0], { sourceId: "history:soccer", postId: "soccer", publishedAt: "2026-09-01T10:00:00.000Z" });
+  let analyzed = false;
+  analyzer = async () => {
+    analyzed = true;
+    return { summary: "", findings: [], droppedFindings: 0 };
+  };
+  const res = await call("POST", "/api/history/suggest", ALICE, suggestBody("Riverside soccer again"));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.suggestions, [
+    { postId: "soccer", publishedAt: "2026-09-01T10:00:00.000Z", sharedWords: 2 },
+    { postId: "old-beach", publishedAt: "2025-06-01T10:00:00.000Z", sharedWords: 0 },
+  ]);
+  assert.equal(analyzed, false, "suggest must not call the model");
+  assert.equal((await call("POST", "/api/history/suggest", null, suggestBody("x"))).status, 400);
 });
 
-test("includeHistory without a user id is refused", async () => {
-  assert.equal((await call("POST", "/api/analyze", null, analyzeBody("hi", true))).status, 400);
+test("analysis uses EXACTLY the chosen posts, in order, with ids and dates", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([
+    post("old-beach", "Beach day", "2025-06-01T10:00:00Z"),
+    post("soccer", "Riverside soccer practice", "2026-09-01T10:00:00Z"),
+    post("cafe", "Coffee downtown", "2026-08-01T10:00:00Z"),
+  ]));
+
+  await call("POST", "/api/analyze", ALICE, analyzeBody("Riverside soccer again"));
+  assert.deepEqual(lastSources.map((s) => s.id), ["caption"], "no history unless chosen");
+
+  // The user kept only old-beach and soccer (not the order relevance would pick).
+  const res = await call("POST", "/api/analyze", ALICE, analyzeBody("Riverside soccer again", ["old-beach", "soccer"]));
+  assert.deepEqual(lastSources.map((s) => s.id), ["caption", "history:old-beach", "history:soccer"]);
+  assert.equal(lastSources[2].type, "history");
+  assert.equal(lastSources[2].date, "2026-09-01T10:00:00.000Z");
+  assert.deepEqual(res.body.historyUsed.map((h: any) => h.postId), ["old-beach", "soccer"]);
+});
+
+test("bad history choices are refused before anything is analyzed", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "a")]));
+  lastSources = [];
+  assert.equal((await call("POST", "/api/analyze", null, analyzeBody("hi", ["p1"]))).status, 400, "needs a user id");
+  assert.equal((await call("POST", "/api/analyze", ALICE, analyzeBody("hi", ["nope"]))).status, 400, "unknown post");
+  assert.equal((await call("POST", "/api/analyze", ALICE, analyzeBody("hi", ["p1", "p1"]))).status, 400, "duplicate");
+  const nine = Array.from({ length: 9 }, (_, i) => `q${i}`);
+  assert.equal((await call("POST", "/api/analyze", ALICE, analyzeBody("hi", nine))).status, 400, "more than 8");
+  const oldStyle = { ...analyzeBody("hi"), includeHistory: true };
+  assert.equal((await call("POST", "/api/analyze", ALICE, oldStyle)).status, 400, "old includeHistory field");
+  assert.deepEqual(lastSources, []);
 });
 
 // --- Live failures are errors, never mock results ------------------------------------

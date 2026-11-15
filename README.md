@@ -64,7 +64,7 @@ If `check:databricks` fails: an OAuth token error means the workspace host, clie
 
 ### Earlier posts (history)
 
-The backend can compare a draft with earlier posts the user **explicitly approved** (`includeHistory: true` on `/api/analyze`, plus the `X-Second-Look-User` header). Only published posts can be imported, users never see each other's history, and approvals can be revoked (deleting those posts and anything the AI derived from them). Routes are listed in `shared/contract.ts`.
+The backend can compare a draft with earlier posts the user **explicitly approved**. The consent step lists the posts (pre-selected with `POST /api/history/suggest`), and the user's final choice goes in `historyPostIds` on `/api/analyze`, plus the `X-Second-Look-User` header. Exactly those posts are used: nothing is added or swapped, and a post that was deleted or revoked meanwhile makes the check fail rather than be silently skipped. Only published posts can be imported, users never see each other's history, and approvals can be revoked (deleting those posts and anything the AI derived from them). Routes are listed in `shared/contract.ts`.
 
 Storage today is **temporary and in memory** (`HISTORY_STORE=dev-memory`): not Databricks, and cleared on restart. Databricks storage (`HISTORY_STORE=databricks-app`) waits on the app endpoints in [docs/DATABRICKS_APP_API.md](docs/DATABRICKS_APP_API.md); verify it with `npm run check:history`. The popup has no history screen yet.
 

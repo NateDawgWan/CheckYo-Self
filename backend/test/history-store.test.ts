@@ -9,7 +9,7 @@ import { PatTokenProvider } from "../src/auth";
 import { DatabricksClient } from "../src/databricks";
 import { AppError } from "../src/errors";
 import { APP_HISTORY_PATHS, DatabricksAppHistoryStore } from "../src/history/appStore";
-import { selectRelevantHistory } from "../src/history/relevance";
+import { buildHistorySources, suggestHistory } from "../src/history/relevance";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -62,27 +62,41 @@ test("an import the app only partly stored is an error", async () => {
   await assert.rejects(store().importPosts("alice_user_0001", "00000000-0000-0000-0000-000000000000", "2026-01-03T00:00:00Z", posts));
 });
 
-// --- Relevance -----------------------------------------------------------------------
+// --- Relevance (suggestions only) and building the user's exact choice ---------------
 
-test("relevance: shared words first, then most recent, with ids and dates", () => {
+test("suggestions: shared words first, then most recent; at most 8", () => {
   const draft = [{ id: "caption", type: "caption" as const, text: "Back at Riverside soccer field" }];
   const posts = [
     stored("beach", "Beach day", "2026-09-30T00:00:00Z"),
     stored("soccer", "Riverside soccer tournament", "2025-01-01T00:00:00Z"),
     stored("cafe", "Coffee downtown", "2026-08-01T00:00:00Z"),
   ];
-  const { sources, used } = selectRelevantHistory(draft, posts);
-  assert.deepEqual(sources.map((s) => s.id), ["history:soccer", "history:beach", "history:cafe"]);
-  assert.equal(sources[0].date, "2025-01-01T00:00:00Z");
-  assert.equal(used[0].postId, "soccer");
-});
-
-test("relevance never exceeds the per-analysis or character limits", () => {
-  const draft = [{ id: "caption", type: "caption" as const, text: "x".repeat(LIMITS.maxTotalChars - 6000) }];
-  const posts = Array.from({ length: 20 }, (_, i) => stored(`p${i}`, "y".repeat(4000), `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`));
-  const { sources } = selectRelevantHistory(draft, posts);
-  assert.equal(sources.length, 1, "only one 4000-char post fits in the remaining 6000 chars");
+  const ranked = suggestHistory(draft, posts);
+  assert.deepEqual(ranked.map((r) => r.post.postId), ["soccer", "beach", "cafe"]);
+  assert.equal(ranked[0].sharedWords, 2);
 
   const many = Array.from({ length: 20 }, (_, i) => stored(`q${i}`, "short", "2026-01-01T00:00:00Z"));
-  assert.equal(selectRelevantHistory([{ id: "caption", type: "caption", text: "hi" }], many).sources.length, 8);
+  assert.equal(suggestHistory(draft, many).length, 8);
+});
+
+test("the user's chosen posts become sources in their order, with ids and dates", () => {
+  const draft = [{ id: "caption", type: "caption" as const, text: "hello" }];
+  const chosen = [stored("b", "Second", "2026-02-01T00:00:00Z"), stored("a", "First", "2026-01-01T00:00:00Z")];
+  const { sources, used } = buildHistorySources(draft, chosen);
+  assert.deepEqual(sources.map((s) => [s.id, s.type, s.date]), [
+    ["history:b", "history", "2026-02-01T00:00:00Z"],
+    ["history:a", "history", "2026-01-01T00:00:00Z"],
+  ]);
+  assert.deepEqual(used.map((u) => u.postId), ["b", "a"]);
+});
+
+test("a choice that breaks the limits is refused, never trimmed silently", () => {
+  const isBadRequest = (err: unknown) => err instanceof AppError && err.code === "BAD_REQUEST";
+  const draft = [{ id: "caption", type: "caption" as const, text: "x".repeat(LIMITS.maxTotalChars - 6000) }];
+  const twoLong = [stored("p1", "y".repeat(4000), "2026-01-01T00:00:00Z"), stored("p2", "y".repeat(4000), "2026-01-02T00:00:00Z")];
+  assert.throws(() => buildHistorySources(draft, twoLong), isBadRequest);
+  assert.equal(buildHistorySources(draft, twoLong.slice(0, 1)).sources.length, 1);
+
+  const nine = Array.from({ length: 9 }, (_, i) => stored(`q${i}`, "short", "2026-01-01T00:00:00Z"));
+  assert.throws(() => buildHistorySources([{ id: "caption", type: "caption", text: "hi" }], nine), isBadRequest);
 });

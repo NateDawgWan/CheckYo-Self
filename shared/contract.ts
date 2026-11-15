@@ -10,7 +10,7 @@
 //   "1" milestone 1 import.
 //   "2" AnalyzeResponse.droppedFindings, HealthResponse.databricks,
 //       verified-evidence rule, validated suggested edits.
-//   "3" Approved history: AnalyzeRequest.includeHistory,
+//   "3" Approved history: AnalyzeRequest.historyPostIds,
 //       AnalyzeResponse.historyUsed, /api/history routes,
 //       HealthResponse.history, USER_ID_HEADER.
 export const CONTRACT_VERSION = "3" as const;
@@ -71,10 +71,14 @@ export interface AnalyzeRequest {
    */
   sources: TextSource[];
   /**
-   * true = also compare the draft with this user's approved earlier posts.
-   * Needs the USER_ID_HEADER. Default false.
+   * Earlier posts to compare the draft with: EXACTLY the postIds the user saw
+   * and agreed to on the consent step (at most HISTORY_LIMITS.maxPostsPerAnalysis).
+   * Each must be in this user's approved history; otherwise the request is
+   * refused (nothing is added or swapped silently). Needs the USER_ID_HEADER.
+   * Omit or [] = no history. To pre-select relevant posts, use
+   * POST /api/history/suggest.
    */
-  includeHistory?: boolean;
+  historyPostIds?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +242,7 @@ export interface HealthResponse {
 //
 //   POST   /api/history/import                       HistoryImportRequest -> HistoryImportResponse
 //   GET    /api/history                              -> HistoryListResponse
+//   POST   /api/history/suggest                      HistorySuggestRequest -> HistorySuggestResponse
 //   DELETE /api/history/posts/:postId                -> HistoryDeleteResponse
 //   POST   /api/history/approvals/:approvalId/revoke -> HistoryDeleteResponse
 //   DELETE /api/history                              -> HistoryDeleteResponse  ("delete all my history")
@@ -293,6 +298,27 @@ export interface HistoryListResponse {
   contractVersion: typeof CONTRACT_VERSION;
   store: HistoryStoreKind;
   posts: StoredHistoryPost[];
+}
+
+/**
+ * Ask which approved posts look relevant to a draft, to PRE-SELECT them in the
+ * consent step. Nothing is analyzed or sent to Databricks. The user still
+ * decides; only the postIds they keep go into AnalyzeRequest.historyPostIds.
+ */
+export interface HistorySuggestRequest {
+  contractVersion: typeof CONTRACT_VERSION;
+  /** The draft: "caption" / "image_text" sources, same rules as AnalyzeRequest. */
+  sources: TextSource[];
+}
+
+export interface HistorySuggestResponse {
+  contractVersion: typeof CONTRACT_VERSION;
+  /**
+   * At most HISTORY_LIMITS.maxPostsPerAnalysis of this user's approved posts,
+   * most relevant first (shared words with the draft, then most recent).
+   * `sharedWords` = how many meaningful words the post shares with the draft.
+   */
+  suggestions: Array<{ postId: string; publishedAt: string; sharedWords: number }>;
 }
 
 export interface HistoryDeleteResponse {

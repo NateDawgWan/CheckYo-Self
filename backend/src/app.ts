@@ -5,6 +5,7 @@
 //   POST   /api/analyze                               -> AnalyzeResponse
 //   POST   /api/history/import                        -> HistoryImportResponse
 //   GET    /api/history                               -> HistoryListResponse
+//   POST   /api/history/suggest                       -> HistorySuggestResponse
 //   DELETE /api/history/posts/:postId                 -> HistoryDeleteResponse
 //   POST   /api/history/approvals/:approvalId/revoke  -> HistoryDeleteResponse
 //   DELETE /api/history                               -> HistoryDeleteResponse
@@ -22,13 +23,21 @@ import {
   type HistoryDeleteResponse,
   type HistoryImportResponse,
   type HistoryListResponse,
+  type HistorySuggestResponse,
   type TextSource,
 } from "../../shared/contract";
 import { AppError } from "./errors";
-import { selectRelevantHistory } from "./history/relevance";
+import { buildHistorySources, suggestHistory } from "./history/relevance";
 import type { AiInterpretation, HistoryStore } from "./history/store";
 import type { ParsedAnalysis } from "./parse";
-import { validateAnalyzeRequest, validateApprovalId, validateHistoryImport, validatePostId, validateUserId } from "./validate";
+import {
+  validateAnalyzeRequest,
+  validateApprovalId,
+  validateHistoryImport,
+  validateHistorySuggest,
+  validatePostId,
+  validateUserId,
+} from "./validate";
 
 export interface AppDeps {
   mode: AnalysisMode;
@@ -93,15 +102,25 @@ export function createApp(deps: AppDeps) {
       const startedAt = Date.now();
       const request = validateAnalyzeRequest(req.body);
 
-      // Approved history, only if asked for, only for this user.
+      // Earlier posts: EXACTLY the ones the user chose on the consent step,
+      // and only from THIS user's approved history. Nothing is added or swapped.
       let sources: TextSource[] = request.sources;
       let historyUsed: AnalyzeResponse["historyUsed"] = [];
       let userId: string | null = null;
-      if (request.includeHistory) {
+      if (request.historyPostIds) {
         userId = userIdOf(req);
-        const selected = selectRelevantHistory(request.sources, await deps.historyStore.listPosts(userId));
-        sources = [...request.sources, ...selected.sources];
-        historyUsed = selected.used;
+        const stored = new Map((await deps.historyStore.listPosts(userId)).map((p) => [p.postId, p]));
+        const missing = request.historyPostIds.filter((id) => !stored.has(id));
+        if (missing.length > 0) {
+          throw new AppError(
+            "BAD_REQUEST",
+            400,
+            `${missing.length} chosen earlier post(s) are not in your approved history (deleted or revoked?). Review the list and check again.`,
+          );
+        }
+        const chosen = buildHistorySources(request.sources, request.historyPostIds.map((id) => stored.get(id)!));
+        sources = [...request.sources, ...chosen.sources];
+        historyUsed = chosen.used;
       }
 
       const result = await deps.analyze(sources);
@@ -168,6 +187,23 @@ export function createApp(deps: AppDeps) {
     route(async (req, res) => {
       const posts = await deps.historyStore.listPosts(userIdOf(req));
       const body: HistoryListResponse = { contractVersion: CONTRACT_VERSION, store: deps.historyStore.kind, posts };
+      res.json(body);
+    }),
+  );
+
+  // Suggests which approved posts to pre-select for a draft. Analyzes nothing
+  // and calls no AI; the user still chooses on the consent step.
+  app.post(
+    "/api/history/suggest",
+    checkOrigin,
+    route(async (req, res) => {
+      const userId = userIdOf(req);
+      const request = validateHistorySuggest(req.body);
+      const ranked = suggestHistory(request.sources, await deps.historyStore.listPosts(userId));
+      const body: HistorySuggestResponse = {
+        contractVersion: CONTRACT_VERSION,
+        suggestions: ranked.map((r) => ({ postId: r.post.postId, publishedAt: r.post.publishedAt, sharedWords: r.sharedWords })),
+      };
       res.json(body);
     }),
   );

@@ -9,8 +9,8 @@ Last updated: 2026-11-14, branch `Backend-Connection/History`.
 | Check | Result |
 |---|---|
 | `npm run typecheck` (backend, extension) | Pass |
-| `npm test` backend | 48/48 pass |
-| `npm test` extension | 13/13 pass |
+| `npm test` backend | 50/50 pass |
+| `npm test` extension | 45/45 pass (includes the OCR module's tests from `main`) |
 | `npm run build` (extension) | Pass |
 
 What the backend tests cover, all against a **fake** `fetch` or the in-memory store:
@@ -31,13 +31,17 @@ What the backend tests cover, all against a **fake** `fetch` or the in-memory st
   - history can't be smuggled into a draft;
   - users are isolated (list, analysis, delete and revoke);
   - revoking deletes the posts and the AI interpretations derived from them;
-  - relevant history is selected within limits, with source ids and dates;
+  - suggestions rank relevant posts without calling the model;
+  - analysis uses exactly the chosen posts, in order, with source ids and dates;
+  - unknown, other users', revoked, duplicate or too many post ids are refused before anything is analyzed;
+  - a choice over the size limits is refused, never trimmed;
   - the app-store client sends POST requests to `/api/` routes with the user id in the body, and rejects malformed or partial app responses.
 
 Manual mock-mode run (`ANALYSIS_MODE=mock`, `HISTORY_STORE=dev-memory`), using one synthetic post:
 
 - `/api/health` showed `databricks.state: not_used` and `history.store: dev-memory`.
-- Import, then analysis with `includeHistory` added `history:p1` with its date. A verified quote from it made the finding `crossSource: true`.
+- Import, then analysis with `historyPostIds: ["p1"]` added `history:p1` with its date. A verified quote from it made the finding `crossSource: true`.
+- `/api/history/suggest` ranked the post sharing words with the draft first. An unknown post id in `historyPostIds` was refused with 400 before anything was analyzed.
 - Revoke deleted the post, and a second user id saw nothing.
 
 ## Live results (real Databricks)

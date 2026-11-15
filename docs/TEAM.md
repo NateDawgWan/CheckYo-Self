@@ -91,12 +91,14 @@ GET    /api/history                               -> HistoryListResponse
 DELETE /api/history/posts/:postId                 -> HistoryDeleteResponse
 POST   /api/history/approvals/:approvalId/revoke  -> HistoryDeleteResponse
 DELETE /api/history                               -> HistoryDeleteResponse   ("delete all my history")
-POST   /api/analyze  { ..., includeHistory: true } -> AnalyzeResponse with historyUsed
+POST   /api/history/suggest                       { sources } -> HistorySuggestResponse (pre-selection only)
+POST   /api/analyze  { ..., historyPostIds: [...] } -> AnalyzeResponse with historyUsed
 ```
 
-- Every history call (and `includeHistory`) needs the `X-Second-Look-User` header: a random id the extension creates once per install and keeps in `chrome.storage`. That's for owner 2 or 4 to add.
+- Every history call (and `historyPostIds`) needs the `X-Second-Look-User` header: a random id the extension creates once per install and keeps in `chrome.storage`. That's for owner 2 or 4 to add.
 - `approval.postIds` must list exactly the imported posts. The response's `approvalId` is what the user revokes later.
-- The extension sends only the draft. The backend adds `history:<postId>` sources (with `date`) itself, picking relevant approved posts.
+- Consent flow: call `/api/history/suggest` with the draft, show the user's approved posts with the suggestions pre-ticked, and let the user change the selection. Send the final postIds in `historyPostIds`; the consent step lists exactly those posts. The backend adds them as `history:<postId>` sources (with `date`), in that order, and refuses the request if any is no longer in the user's approved history. The extension never sends `history` sources itself.
+- Use the backend's `HistoryPost` / `StoredHistoryPost` shapes (`publishedAt`, `status: "published"`), and use the `approvalId` the backend returns from import (don't make your own).
 - Storage is behind one interface (`backend/src/history/store.ts`): a temporary in-memory dev store today, and the Databricks App store once Genie builds the endpoints in `docs/DATABRICKS_APP_API.md`. AI interpretations are stored apart from posts and deleted with them.
 
 ### E. Warning interface (owner 2) — **in code**, consumed by everyone

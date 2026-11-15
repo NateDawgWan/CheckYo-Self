@@ -9,6 +9,7 @@ import {
   type AnalyzeRequest,
   type HistoryImportRequest,
   type HistoryPost,
+  type HistorySuggestRequest,
   type SourceType,
   type TextSource,
 } from "../../shared/contract";
@@ -41,36 +42,66 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function validateAnalyzeRequest(body: unknown): AnalyzeRequest {
-  if (!isPlainObject(body)) fail("Body must be a JSON object.");
-  checkOnlyKeys(body, ["contractVersion", "draftHash", "sources", "includeHistory"], "request");
-  if (body.includeHistory !== undefined && typeof body.includeHistory !== "boolean") {
-    fail("includeHistory must be true or false.");
-  }
-
-  if (body.contractVersion !== CONTRACT_VERSION) {
+function checkContractVersion(value: unknown) {
+  if (value !== CONTRACT_VERSION) {
     fail(`contractVersion must be "${CONTRACT_VERSION}". Rebuild the extension and restart the backend.`);
   }
+}
+
+export function validateAnalyzeRequest(body: unknown): AnalyzeRequest {
+  if (!isPlainObject(body)) fail("Body must be a JSON object.");
+  checkOnlyKeys(body, ["contractVersion", "draftHash", "sources", "historyPostIds"], "request");
+  checkContractVersion(body.contractVersion);
   if (typeof body.draftHash !== "string" || !HASH_PATTERN.test(body.draftHash)) {
     fail("draftHash must be a 64-character lowercase hex SHA-256.");
   }
-  if (!Array.isArray(body.sources) || body.sources.length === 0) {
+  const sources = validateDraftSources(body.sources);
+  const request: AnalyzeRequest = { contractVersion: CONTRACT_VERSION, draftHash: body.draftHash, sources };
+
+  // Earlier posts the user chose on the consent step. Checked for format here;
+  // the server then checks each one is in THIS user's approved history.
+  if (body.historyPostIds !== undefined) {
+    if (!Array.isArray(body.historyPostIds)) fail("historyPostIds must be a list of post ids.");
+    if (body.historyPostIds.length > HISTORY_LIMITS.maxPostsPerAnalysis) {
+      fail(`Choose at most ${HISTORY_LIMITS.maxPostsPerAnalysis} earlier posts per check.`);
+    }
+    const ids = body.historyPostIds.map(validatePostId);
+    if (new Set(ids).size !== ids.length) fail("historyPostIds lists the same post twice.");
+    if (ids.length > 0) request.historyPostIds = ids;
+  }
+  return request;
+}
+
+/** POST /api/history/suggest: the draft only. */
+export function validateHistorySuggest(body: unknown): HistorySuggestRequest {
+  if (!isPlainObject(body)) fail("Body must be a JSON object.");
+  checkOnlyKeys(body, ["contractVersion", "sources"], "request");
+  checkContractVersion(body.contractVersion);
+  return { contractVersion: CONTRACT_VERSION, sources: validateDraftSources(body.sources) };
+}
+
+/**
+ * The DRAFT's sources ("caption" and "image_text" only). Also enforces the
+ * privacy rule: text only, no image data or image URLs.
+ */
+function validateDraftSources(rawSources: unknown): TextSource[] {
+  if (!Array.isArray(rawSources) || rawSources.length === 0) {
     fail("sources must be a non-empty array.");
   }
-  if (body.sources.length > LIMITS.maxSources) {
+  if (rawSources.length > LIMITS.maxSources) {
     fail(`Too many sources (max ${LIMITS.maxSources}).`);
   }
 
   const seenIds = new Set<string>();
   let totalChars = 0;
-  const sources: TextSource[] = body.sources.map((raw, i) => {
+  const sources: TextSource[] = rawSources.map((raw, i) => {
     const where = `sources[${i}]`;
     if (!isPlainObject(raw)) fail(`${where} must be an object.`);
     checkOnlyKeys(raw, ["id", "type", "text", "date"], where);
 
     const { id, type, text, date } = raw;
     if (type === "history") {
-      fail(`${where}: history can't be sent with a draft. Import approved posts with /api/history/import and set includeHistory.`);
+      fail(`${where}: history can't be sent with a draft. Import approved posts with /api/history/import and list them in historyPostIds.`);
     }
     if (typeof id !== "string" || !ID_PATTERN.test(id)) fail(`${where}.id is not a valid source id.`);
     if (seenIds.has(id)) fail(`Duplicate source id "${id}".`);
@@ -96,10 +127,7 @@ export function validateAnalyzeRequest(body: unknown): AnalyzeRequest {
 
   if (totalChars > LIMITS.maxTotalChars) fail(`Request text too long (max ${LIMITS.maxTotalChars} chars total).`);
   if (!sources.some((s) => s.text.trim().length > 0)) fail("All sources are empty. Type a caption first.");
-
-  const request: AnalyzeRequest = { contractVersion: CONTRACT_VERSION, draftHash: body.draftHash, sources };
-  if (body.includeHistory === true) request.includeHistory = true;
-  return request;
+  return sources;
 }
 
 // ---------------------------------------------------------------------------
