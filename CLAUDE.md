@@ -8,7 +8,8 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 - Mock mode is tested: typechecks, extension build, `npm test` regression tests in both packages, and manual `curl` checks of `/api/health` and `/api/analyze`.
 - Databricks integration is written and unit-tested with a fake `fetch`, but has **not** passed a live credentialed test. Treat it as unverified until `npm run check:databricks` prints `Success. Connection verified.` against a real workspace. "Configured" (settings filled in) is not "verified".
 - Team ownership and the interfaces between areas are in `docs/TEAM.md`.
-- Instagram interception, automatic image OCR, historical storage, and cross-post
+- Milestone 2 (in progress): local OCR module in `extension/src/ocr/` (Tesseract.js, bundled; unit tests, `npm run check:ocr`, and a local test page). Not yet wired into the popup, and not yet run inside the loaded extension.
+- Instagram interception, historical storage, and cross-post
   reasoning are future milestones unless subsequent code and tests establish otherwise.
 - Implement only the milestone assigned in the current task.
 - Preserve the existing working structure; do not reorganize it without a concrete need.
@@ -53,6 +54,7 @@ extension/src/popup.ts        Popup wiring, draft hashing, stale detection, appl
 extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
+extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
 backend/test/, extension/test/  Regression tests (node:test, run with `npm test`)
 docs/ROADMAP.md               Next milestones, history storage plan, Instagram assumptions
 docs/TEAM.md                  Module owners and integration interfaces (in code vs. proposed)
@@ -76,6 +78,7 @@ cd extension && npm run watch
 # Checks (run all of these before committing)
 cd backend && npm run typecheck && npm test
 cd extension && npm run typecheck && npm test && npm run build
+cd extension && npm run check:ocr           # real OCR engine on the fictional demo images
 
 # Databricks (only with real credentials in backend/.env)
 cd backend && npm run check:databricks    # must print "Success. Connection verified."
