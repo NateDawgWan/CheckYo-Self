@@ -14,6 +14,7 @@ import { applyEditToText } from "./edits";
 import { OcrError, readImageText } from "./ocr";
 import { describePhotoRead, photoProgressLabel, PHOTO_TEXT_MAX_CHARS, type PhotoReadNotice } from "./photo-text";
 import { renderResults, type ResultElements } from "./render";
+import { renderVerdict, type VerdictElements } from "./verdict";
 
 const SAMPLE_CAPTION =
   "Back at Lincoln Park Elementary pickup again 🙃 same 3:15 chaos every weekday. " +
@@ -51,6 +52,16 @@ const resultEls: ResultElements = {
   meta: byId("meta"),
   mockBanner: byId("mock-banner"),
   incompleteBanner: byId("incomplete-banner"),
+};
+// Score, LOW/MEDIUM/HIGH stamp and advice cards (display only, see verdict.ts).
+const verdictEls: VerdictElements = {
+  root: byId("verdict"),
+  score: byId("verdict-score"),
+  stamp: byId("verdict-stamp"),
+  headline: byId("verdict-headline"),
+  note: byId("verdict-note"),
+  advice: byId("advice"),
+  adviceList: byId("advice-list"),
 };
 
 /** The last result we showed, plus the exact text it was about. */
@@ -204,6 +215,7 @@ async function analyze() {
     const result = await analyzeDraft(sources, draftHash);
     lastResult = result;
     renderResults(resultEls, result, sources, applyEdit);
+    renderVerdict(verdictEls, result, sources);
     const n = result.findings.length;
     if (result.droppedFindings > 0) {
       // Some warnings could not be checked, so don't call this "complete".
