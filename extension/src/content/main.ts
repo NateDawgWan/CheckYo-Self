@@ -24,6 +24,7 @@ import { applyEditToText } from "../edits";
 import { describePhotoRead, PHOTO_TEXT_MAX_CHARS } from "../photo-text";
 import type { OcrPort, WarningPanel, WarningPanelActions } from "../ports";
 import { offscreenOcr } from "./offscreen-ocr";
+import { carouselProgress, PhotoSet } from "./photo-set";
 import {
   detectPublishOutcome,
   readComposer,
@@ -37,13 +38,12 @@ import { createOverlayPanel } from "./overlay";
 import { ShareFlow, draftKey, type PublishOutcome } from "./share-flow";
 
 /**
- * The kinds of post the extension helps with. For anything else (several
- * photos, video, or a post we can't recognise) the extension does nothing at
- * all: no button, and Share is never paused.
- * TO SUPPORT ANOTHER TYPE: add it here, then give each of its photos a
- * "Text in the photo" source in currentSources() (image_text:1, :2, ...).
+ * The kinds of post the extension helps with. For anything else (video, or a
+ * post we can't recognise) the extension does nothing at all: no button, and
+ * Share is never paused. Each photo gets its own "Text in photo N" box and
+ * source (image_text:1, :2, ...); see photo-set.ts.
  */
-export const SUPPORTED_POST_TYPES: PostType[] = ["single-photo"];
+export const SUPPORTED_POST_TYPES: PostType[] = ["single-photo", "multi-photo"];
 
 /** Is the caption step of a supported post open right now? */
 function isSupportedCaptionStep(snapshot: ComposerSnapshot): boolean {
@@ -61,11 +61,15 @@ export function startInstagramIntegration(options: IntegrationOptions) {
 
   // What we last read from the page.
   let snapshot: ComposerSnapshot = readComposer(document);
-  let imageKey: string | null = null; // which photo(s) are selected; a change means a different post
-  let imageText = "";   // text in the (single) photo: from OCR, or typed by the user in our panel
-  let ocrTurn = 0;      // to ignore OCR results for a photo that is no longer selected
-  let ocrRunning = false;      // true while the photo is being read; checking waits for it
-  let imageTextTyped = false;  // the user typed in the photo-text box; OCR must not overwrite it
+  // The post's photos and the text in each (photo-set.ts). For a carousel,
+  // photos are added as the user clicks through the slides.
+  const photos = new PhotoSet();
+  let photoGeneration = 0; // bumped when the composer closes, so old reads are ignored
+  // Photos waiting to be read. ONE at a time: the OCR page cancels a running
+  // read when another photo from the same tab arrives.
+  const readQueue: { key: string; blob: Promise<Blob | null>; generation: number }[] = [];
+  let queueRunning = false;
+  let reachedLastSlide = false; // the carousel's last photo was shown (no "next" arrow)
   let sharedDraftHash: Promise<string> | null = null; // hash of the draft that was shared
 
   // -------------------------------------------------------------------------
@@ -74,13 +78,11 @@ export function startInstagramIntegration(options: IntegrationOptions) {
 
   /** The draft as TextSources. Only text — never the image. */
   function currentSources(): TextSource[] {
-    const sources: TextSource[] = [{ id: "caption", type: "caption", text: snapshot.caption }];
-    if (imageText.trim()) sources.push({ id: "image_text:1", type: "image_text", text: imageText });
-    return sources;
+    return [{ id: "caption", type: "caption", text: snapshot.caption }, ...photos.sources()];
   }
 
   function currentKey(): string {
-    return draftKey(currentSources(), imageKey);
+    return draftKey(currentSources(), photos.key());
   }
 
   function getPanel(): WarningPanel {
@@ -100,16 +102,16 @@ export function startInstagramIntegration(options: IntegrationOptions) {
         panel.close();
         panel.setShareReady(false);
       }
-      if (imageKey !== null || flow.isShareAllowed(Date.now())) {
+      if (photos.key() !== null || flow.isShareAllowed(Date.now())) {
         // The user closed the composer or went back a step without sharing.
         if (flow.isShareAllowed(Date.now())) console.info("[CheckYo'Self] Share outcome: cancelled");
         flow.composerClosed();
-        imageKey = null;
-        imageText = "";
-        imageTextTyped = false;
-        ocrTurn++; // ignore a scan still running for the closed post
-        ocrRunning = false;
-        panel?.setPhotoNotices([]);
+        photos.reset();
+        photoGeneration++; // ignore reads still running for the closed post
+        readQueue.length = 0;
+        reachedLastSlide = false;
+        panel?.setPhotos([], { text: "", done: false });
+        panel?.setLauncherPrompt(null);
         panel?.clearResult();
         panel?.setStale(false);
       }
@@ -119,14 +121,17 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     const p = getPanel();
     if (!p.isOpen()) p.showLauncher(true);
 
-    // A different photo: forget the old photo text and read the new one.
-    const newImageKey = snapshot.images.map((image) => image.key).join("|");
-    if (newImageKey !== imageKey) {
-      imageKey = newImageKey;
-      imageText = "";
-      imageTextTyped = false;
-      void startOcr();
+    // New photos on screen (a carousel shows one slide at a time): number
+    // them, grab each one's data NOW (the slide may leave the page when the
+    // user moves on), and queue it to be read.
+    const added = photos.sync(snapshot.images.map((image) => image.key));
+    for (const entry of added) {
+      const image = snapshot.images.find((i) => i.key === entry.key)!;
+      readQueue.push({ key: entry.key, blob: readImageBlob(image), generation: photoGeneration });
     }
+    if (snapshot.carousel.hasPrev && !snapshot.carousel.hasNext) reachedLastSlide = true;
+    if (added.length) void runReadQueue();
+    renderPhotos(); // also updates the carousel prompt (e.g. the last photo was reached)
 
     draftChanged();
   }
@@ -150,62 +155,60 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   // sends nothing for analysis; see content/offscreen-ocr.ts.
   // -------------------------------------------------------------------------
 
-  /** Show OCR's text, unless the user already typed their own (never overwrite it). */
-  function showOcrText(text: string, hint: string) {
+  /** Draws one "Text in photo N" box per photo, plus a note for carousels. */
+  function renderPhotos() {
+    const all = photos.all();
+    const many = all.length > 1 || snapshot.postType === "multi-photo";
     const p = getPanel();
-    if (imageTextTyped) {
-      p.setImageText(imageText, `${hint} You had already typed the photo text, so yours was kept.`);
-      return;
-    }
-    imageText = text;
-    p.setImageText(text, hint);
+    // A carousel: prompt the user (on the corner button AND in the panel) to
+    // click through every photo, until the last one has been shown and read.
+    const progress = many ? carouselProgress(all.length, reachedLastSlide, photos.isReading()) : null;
+    p.setLauncherPrompt(progress?.launcher ?? null);
+    p.setPhotos(
+      all.map((ph) => ({ index: ph.index, label: many ? `Text in photo ${ph.index}` : "Text in the photo", text: ph.text, hint: ph.hint, notices: ph.notices })),
+      { text: progress?.banner ?? "", done: progress?.complete ?? false },
+    );
   }
 
-  async function startOcr() {
-    const myTurn = ++ocrTurn;
-    const p = getPanel();
-    const photo = snapshot.images[0]; // single-photo posts only (see SUPPORTED_POST_TYPES)
-    ocrRunning = false;
-    p.setPhotoNotices([]); // notices belong to the previous photo
-    if (!photo) {
-      p.setImageText("", "Type any text you can see in the photo (signs, name tags, jerseys).");
-      return;
-    }
-    if (!options.ocr.available) {
-      p.setImageText("", "Automatic photo reading isn't available. Type any text you can see in the photo (signs, name tags, jerseys).");
-      return;
-    }
-    ocrRunning = true;
-    p.setImageText("", "Reading text from the photo on your computer… (nothing is sent yet)");
+  /** Reads the queued photos one by one, on this computer (see content/offscreen-ocr.ts). */
+  async function runReadQueue() {
+    if (queueRunning) return;
+    queueRunning = true;
     try {
-      const blob = await readImageBlob(photo);
-      if (myTurn !== ocrTurn) return; // a newer photo was selected meanwhile
-      if (!blob) {
-        showOcrText("", "Couldn't read this photo from the page. Type any text you can see in it.");
-        return;
+      while (readQueue.length) {
+        const job = readQueue.shift()!;
+        if (job.generation !== photoGeneration) continue; // that post was closed
+        const index = photos.all().find((p) => p.key === job.key)?.index ?? 1;
+        const read = await readOnePhoto(job.blob, index);
+        if (job.generation !== photoGeneration) continue;
+        photos.finishReading(job.key, read.text, read.hint, read.notices);
+        renderPhotos();
+        draftChanged(); // the photo text is part of the draft
       }
-      const result = await options.ocr.readImageText(blob, 1); // stays inside the browser
-      if (myTurn !== ocrTurn) return;
+    } finally {
+      queueRunning = false;
+    }
+  }
 
+  async function readOnePhoto(blobPromise: Promise<Blob | null>, index: number) {
+    const typeIt = "Type any text you can see in this photo (signs, name tags, jerseys).";
+    if (!options.ocr.available) return { text: "", hint: `Automatic photo reading isn't available. ${typeIt}`, notices: [] };
+    const blob = await blobPromise;
+    if (!blob) return { text: "", hint: `Couldn't read this photo from the page. ${typeIt}`, notices: [] };
+    try {
+      const result = await options.ocr.readImageText(blob, index); // stays inside the browser
       // Same rules as the popup (src/photo-text.ts): an unreliable read is
       // thrown away (empty box + notice), a noisy one gets a notice, and the
       // text is cut to the strict PHOTO_TEXT_MAX_CHARS limit.
       const view = describePhotoRead(result);
-      p.setPhotoNotices(view.notices);
       if (view.truncated || view.quality !== "clean") {
-        console.info(`[CheckYo'Self] Photo read: quality=${view.quality}, discarded=${view.discarded}, truncated=${view.truncated}`); // no photo text in logs
+        console.info(`[CheckYo'Self] Photo ${index} read: quality=${view.quality}, discarded=${view.discarded}, truncated=${view.truncated}`); // no photo text in logs
       }
-      showOcrText(view.text, view.hint);
+      return { text: view.text, hint: view.hint, notices: view.notices };
     } catch (err) {
-      if (myTurn !== ocrTurn) return;
       // OCR errors carry a user-readable message (src/ocr/README.md). A failure is never "no text".
       const reason = err instanceof Error ? ` ${err.message}` : "";
-      showOcrText("", `Reading the photo failed.${reason} Type any text you can see in it.`);
-    } finally {
-      if (myTurn === ocrTurn) {
-        ocrRunning = false;
-        draftChanged(); // the photo text is part of the draft
-      }
+      return { text: "", hint: `Reading the photo failed.${reason} ${typeIt}`, notices: [] };
     }
   }
 
@@ -276,9 +279,8 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     onApplyEdit(edit) {
       void applyEdit(edit);
     },
-    onImageTextInput(text) {
-      imageText = text;
-      imageTextTyped = true;
+    onImageTextInput(text, index) {
+      photos.setTyped(index, text);
       draftChanged();
     },
   };
@@ -287,20 +289,26 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     snapshot = readComposer(document);
     const p = getPanel();
     if (!isSupportedCaptionStep(snapshot)) {
-      p.setMessage("Open the caption step of a single-photo post first.", "error");
+      p.setMessage("Open the caption step of a photo post first.", "error");
       return;
     }
     draftChanged();
-    if (ocrRunning && !imageTextTyped) {
-      // Don't send a draft that is missing the photo text the user hasn't seen yet.
-      p.setMessage("Still reading the photo. Check it again in a moment, once its text appears above.", "error");
+    if (photos.isReading()) {
+      // Don't send a draft that is missing photo text the user hasn't seen yet.
+      p.setMessage("Still reading the photos. Check again in a moment, once their text appears above.", "error");
       return;
     }
-    if (imageText.length > PHOTO_TEXT_MAX_CHARS) {
-      // Can't normally happen (the box has the same limit); never send it if it does.
-      p.setMessage(`The photo text is longer than ${PHOTO_TEXT_MAX_CHARS} characters. Shorten it before checking.`, "error");
+    const tooLong = photos.all().find((ph) => ph.text.length > PHOTO_TEXT_MAX_CHARS);
+    if (tooLong) {
+      // Can't normally happen (each box has the same limit); never send it if it does.
+      p.setMessage(`The text of photo ${tooLong.index} is longer than ${PHOTO_TEXT_MAX_CHARS} characters. Shorten it before checking.`, "error");
       return;
     }
+    // A carousel whose last photo wasn't shown yet: check anyway, but say so.
+    const unseenWarning =
+      snapshot.postType === "multi-photo" && !reachedLastSlide
+        ? ` Not all photos were shown: only the ${photos.all().length} you clicked to were checked. Click › to show the rest, then check again.`
+        : "";
     const sources = currentSources();
     if (!sources.some((s) => s.text.trim())) {
       p.setMessage("Write a caption (or type the photo's text) first.", "error");
@@ -331,7 +339,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       p.showResult(reply.result, sources);
       const n = reply.result.findings.length;
       if (reply.result.droppedFindings > 0) {
-        p.setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${reply.result.droppedFindings} not shown.`, "error");
+        p.setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${reply.result.droppedFindings} not shown.${unseenWarning}`, "error");
+      } else if (unseenWarning) {
+        p.setMessage(`Check incomplete:${unseenWarning}`, "error");
       } else {
         p.setMessage(n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`);
       }
@@ -501,7 +511,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       kind: "instagram-draft",
       found,
       caption: found ? snapshot.caption : "",
-      imageText: found ? imageText : "",
+      imageText: found ? photos.joinedText() : "",
     };
     sendResponse(reply);
     return false;
@@ -519,7 +529,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       scan();
     }, 150);
   }
-  new MutationObserver(scheduleScan).observe(document, { childList: true, subtree: true, characterData: true });
+  // attributeFilter "src": a carousel may change slides by swapping the
+  // photo's src instead of adding a new <img>; either way we rescan.
+  new MutationObserver(scheduleScan).observe(document, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["src"] });
   document.addEventListener("input", scheduleScan, true);
   // Also check now and then, so a share that never gets an answer times out.
   window.setInterval(() => flow.isPublishing() && scan(), 2000);

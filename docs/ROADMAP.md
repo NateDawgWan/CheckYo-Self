@@ -26,9 +26,9 @@ Sending history: select the relevant `observed_posts` (start with "the most rece
 
 Add a "Delete my imported history" action before showing this to anyone else.
 
-## Milestone 4: Instagram integration (in code: single-photo posts only)
+## Milestone 4: Instagram integration (in code: photo posts, single or carousel)
 
-Supported workflow: **one single-photo post made in the "Create" dialog on desktop instagram.com, with Instagram in English.** Code: `extension/src/content/` (adapter, share flow, panel), `extension/src/background.ts` (service worker).
+Supported workflow: **one photo post (a single photo or a carousel of photos) made in the "Create" dialog on desktop instagram.com, with Instagram in English.** Code: `extension/src/content/` (adapter, share flow, panel), `extension/src/background.ts` (service worker).
 
 - At the caption step a **"CheckYo'Self: Check this post"** button is always shown (bottom-right). This manual path works even if Share interception stops working.
 - Clicking **Share** is paused and a panel offers **Check this post**, **Back to editing**, or **Share without checking** / **Continue to Share**.
@@ -37,7 +37,7 @@ Supported workflow: **one single-photo post made in the "Create" dialog on deskt
 - Any change to the caption, the photo text, or the selected photo makes results stale. Replies for older requests or changed drafts are ignored. "Apply" only runs if the caption still matches the checked text.
 - Only a share Instagram *confirms* counts as published and is passed to history (currently a stand-in that stores nothing). Closed-without-confirmation is "unknown", never "published".
 - OCR: the OCR module (`extension/src/ocr/`) can't start inside a content script, so the photo is read in an offscreen extension page (`offscreen.html`, `offscreen` permission). The content script grabs the selected photo from the composer's `blob:` image (or canvas), with no upload prompt, and passes it inside the browser: content script → service worker → offscreen page (`src/ocr-relay.ts`, `src/content/offscreen-ocr.ts`). The text appears in the panel for the user to review; nothing is sent for analysis until they click "Check this post". Tested end to end with the built extension in Chrome against a local stand-in composer page, **not yet on the live Instagram site** (assumption 4 below is still unverified).
-- **Only single-photo posts on an English page get any help.** For multi-photo, video or unrecognised posts, and for pages in other languages, the extension does nothing at all: no button, Share is never paused. The manual popup still works for any text.
+- **Photo posts on an English page get help: a single photo or a carousel.** Instagram shows one carousel slide at a time ("Right chevron" on photo 1, "Left chevron" on photo 2, verified 2026-11-15), so photos are collected as the user clicks through them (`src/content/photo-set.ts`), each read once, in order, as `image_text:1..n`; the panel asks the user to click through all slides. Carousel support is tested only on a stand-in composer page (headless Chrome, live backend), **not yet on the live site**. For video, and for pages in other languages, the extension does nothing at all: no button, Share is never paused. The manual popup still works for any text.
 - If interception stops working (for example after Instagram changes its page), use the "Check this post" button, or the popup's **Use Instagram draft** button, which copies the caption into the popup.
 
 ### Adding more later (no rewrite needed)

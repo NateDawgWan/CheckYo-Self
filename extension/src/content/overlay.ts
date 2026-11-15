@@ -10,7 +10,7 @@
 // can't change Instagram's page. It sits OUTSIDE Instagram's own dialog.
 import type { AnalyzeResponse, TextSource } from "../../../shared/contract";
 import { PHOTO_TEXT_MAX_CHARS } from "../photo-text";
-import type { MessageKind, PhotoNotice, WarningPanel, WarningPanelActions } from "../ports";
+import type { MessageKind, PhotoView, WarningPanel, WarningPanelActions } from "../ports";
 import { renderResults, type ResultElements } from "../render";
 import { renderVerdict, type VerdictElements } from "../verdict";
 // The popup's stylesheet, bundled as text by esbuild (see build.mjs).
@@ -35,6 +35,9 @@ const PANEL_CSS = `
 .panel-head h1 { font-size: 16px; }
 .panel-head-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .close { padding: 2px 8px; }
+.photos-note { margin: 8px 0; padding: 8px 10px; border: 2px solid var(--asphalt, #151515); background: var(--amber, #f0a43a); color: var(--asphalt, #151515); font-weight: 700; font-size: 13px; }
+.photos-note.is-done { background: var(--lime, #d6f04a); }
+.photos-note[hidden] { display: none; }
 .intro { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .share-ready { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--low-mark); color: var(--low); font-weight: 600; }
 .actions { flex-wrap: wrap; }
@@ -90,18 +93,10 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   head.append(title, headRight);
   const intro = el("p", "intro");
 
-  const imageLabel = el("label", undefined, "Text in the photo");
-  imageLabel.htmlFor = "sl-image-text";
-  const imageHint = el("p", "hint");
-  // Notices about the photo read: poor quality, unclear words, text cut to the limit.
-  const photoNotices = el("div", "photo-notices");
-  photoNotices.setAttribute("role", "status");
-  const imageText = el("textarea");
-  imageText.id = "sl-image-text";
-  imageText.rows = 4; // OCR text is often several lines
-  imageText.maxLength = PHOTO_TEXT_MAX_CHARS; // strict limit on photo text (src/photo-text.ts)
-  imageText.placeholder = "e.g. a sign, name tag or jersey in the photo";
-  imageText.addEventListener("input", () => actions.onImageTextInput(imageText.value));
+  // One block per photo ("Text in photo N"), drawn by setPhotos().
+  const photosNote = el("p", "photos-note");
+  photosNote.setAttribute("role", "status");
+  const photoBlocks = el("div", "photo-blocks");
 
   const checkButton = button("Check this post", "primary", () => actions.onCheck());
   const backButton = button("Back to editing", "secondary", () => actions.onBack());
@@ -164,11 +159,21 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
 
   const resultEls: ResultElements = { root: results, summary, markedDraft, findings, meta, mockBanner, incompleteBanner };
 
-  panel.append(head, intro, imageLabel, imageHint, photoNotices, imageText, consent, buttonRow, shareReady, message, results);
+  panel.append(head, intro, photosNote, photoBlocks, consent, buttonRow, shareReady, message, results);
   shadow.append(style, launcher, panel);
   document.documentElement.append(host);
 
   let hasResult = false;
+  let isShareReady = false;
+  let launcherPrompt: string | null = null; // e.g. "click › to show each photo"
+
+  function updateLauncherText() {
+    // After "Continue" the panel closes (it can cover Instagram's Share
+    // button), so the corner button tells the user what to do next.
+    launcher.textContent = isShareReady
+      ? "CheckYo'Self: ready. Click Instagram's Share to post."
+      : (launcherPrompt ?? "CheckYo'Self: Check this post");
+  }
   let stale = false;
 
   function updateContinueLabel() {
@@ -194,15 +199,42 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
     isOpen() {
       return !panel.hidden;
     },
-    setImageText(text, hint) {
-      imageText.value = text;
-      imageHint.textContent = hint;
-    },
-    setPhotoNotices(notices: PhotoNotice[]) {
-      // textContent only: notices quote OCR words, which come from the photo.
-      photoNotices.replaceChildren(
-        ...notices.map((n) => el("p", n.kind === "poor" ? "banner banner-incomplete photo-poor" : "banner banner-stale photo-warning", n.text)),
-      );
+    setPhotos(photos: PhotoView[], note) {
+      photosNote.textContent = note.text;
+      photosNote.hidden = !note.text;
+      photosNote.classList.toggle("is-done", note.done);
+      // Keep existing boxes (so typing isn't interrupted); add or remove as needed.
+      while (photoBlocks.children.length > photos.length) photoBlocks.lastElementChild!.remove();
+      photos.forEach((photo, i) => {
+        let block = photoBlocks.children[i] as HTMLElement | undefined;
+        if (!block) {
+          block = el("div", "photo-block");
+          const label = el("label");
+          const hint = el("p", "hint");
+          const notices = el("div", "photo-notices");
+          notices.setAttribute("role", "status");
+          const box = el("textarea");
+          box.rows = 4; // OCR text is often several lines
+          box.maxLength = PHOTO_TEXT_MAX_CHARS; // strict limit on photo text (src/photo-text.ts)
+          box.placeholder = "e.g. a sign, name tag or jersey in the photo";
+          box.addEventListener("input", () => actions.onImageTextInput(box.value, Number(block!.dataset.index)));
+          block.append(label, hint, notices, box);
+          photoBlocks.append(block);
+        }
+        const [label, hint, notices, box] = [...block.children] as [HTMLLabelElement, HTMLElement, HTMLElement, HTMLTextAreaElement];
+        block.dataset.index = String(photo.index);
+        box.id = `sl-image-text-${photo.index}`;
+        label.htmlFor = box.id;
+        label.textContent = photo.label;
+        hint.textContent = photo.hint;
+        // textContent only: notices quote OCR words, which come from the photo.
+        notices.replaceChildren(
+          ...photo.notices.map((n) => el("p", n.kind === "poor" ? "banner banner-incomplete photo-poor" : "banner banner-stale photo-warning", n.text)),
+        );
+        // Never overwrite a box the user is typing in.
+        const typing = shadow.activeElement === box; // closed shadow root: use our own reference
+        if (!typing && box.value !== photo.text) box.value = photo.text;
+      });
     },
     setBackendStatus(status) {
       statusPill.dataset.state = status.state;
@@ -238,11 +270,12 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
     },
     setShareReady(ready) {
       shareReady.hidden = !ready;
-      // After "Continue" the panel closes (it can cover Instagram's Share
-      // button), so the corner button tells the user what to do next.
-      launcher.textContent = ready
-        ? "CheckYo'Self: ready. Click Instagram's Share to post."
-        : "CheckYo'Self: Check this post";
+      isShareReady = ready;
+      updateLauncherText();
+    },
+    setLauncherPrompt(text) {
+      launcherPrompt = text;
+      updateLauncherText();
     },
     destroy() {
       host.remove();

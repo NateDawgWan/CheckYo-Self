@@ -28,7 +28,7 @@ export const offscreenOcr: OcrPort = {
   available: true,
 
   async readImageText(image: Blob, index: number): Promise<OcrResult> {
-    if (index !== 1) throw new OcrError("RECOGNITION_FAILED", "Only single-photo posts are supported.");
+    if (!Number.isInteger(index) || index < 1) throw new OcrError("RECOGNITION_FAILED", "Photo number must be 1 or more.");
     if (image.size === 0) throw new OcrError("NOT_AN_IMAGE", "The photo is empty.");
     if (image.size > OCR_LIMITS.maxImageBytes) {
       throw new OcrError("IMAGE_TOO_LARGE", `This photo is bigger than ${Math.round(OCR_LIMITS.maxImageBytes / 1048576)} MB.`);
