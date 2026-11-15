@@ -8,9 +8,10 @@
 // Only works in a browser page (popup, options page, or later the content
 // script's page). The Node tests cover the files it uses (convert.ts,
 // control.ts); `npm run check:ocr` runs the real engine on the demo images.
-import { createWorker, type Worker as TesseractWorker } from "tesseract.js";
+import { createWorker, PSM, type Worker as TesseractWorker } from "tesseract.js";
 import { makeProgressReporter, throwIfCancelled, waitFor } from "./control";
 import { pageToOcrResult, type RawPage } from "./convert";
+import { combineReads, zoomRegions, type Read, type ZoomRegion } from "./scene";
 import { OCR_LIMITS, OcrError, type OcrProgress, type OcrResult } from "./types";
 
 // Keep these in sync with package.json and build.mjs (OCR_ASSETS).
@@ -79,6 +80,20 @@ async function prepareImage(image: Blob): Promise<{ png: Blob; width: number; he
   }
 }
 
+/**
+ * An enlarged crop of the prepared photo, for reading small text again
+ * (see zoomRegions in scene.ts). Smooth scaling keeps letter edges clean.
+ */
+async function zoomInto(photo: ImageBitmap, region: ZoomRegion): Promise<Blob> {
+  const canvas = new OffscreenCanvas(Math.round(region.width * region.factor), Math.round(region.height * region.factor));
+  const context = canvas.getContext("2d");
+  if (!context) throw new OcrError("RECOGNITION_FAILED", "The browser couldn't prepare the image.");
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(photo, region.x, region.y, region.width, region.height, 0, 0, canvas.width, canvas.height);
+  return canvas.convertToBlob({ type: "image/png" });
+}
+
 /** Turns whatever Tesseract threw into an OcrError (without any image text in it). */
 function toOcrError(error: unknown, code: "ENGINE_LOAD_FAILED" | "RECOGNITION_FAILED"): OcrError {
   if (error instanceof OcrError) return error;
@@ -127,6 +142,9 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
   const crashed = new Promise<never>((_, reject) => { workerCrashed = reject; });
   crashed.catch(() => {}); // only matters if someone is waiting on it
 
+  // Progress of "recognizing": the two whole-photo reads are 0-35% and 35-70%, zoomed crops (if any) 70-100%.
+  let readSpan: [number, number] = [0, 0.7];
+
   try {
     report("loading_engine", 0);
     const starting = createWorker("eng", 1 /* OEM.LSTM_ONLY, matches the *-lstm cores we bundle */, {
@@ -137,7 +155,7 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
       workerBlobURL: false,  // extension pages may not run blob: scripts
       cacheMethod: "none",   // don't keep a copy of the language file in IndexedDB
       logger: (m) => {
-        if (m.status === "recognizing text") report("recognizing", m.progress);
+        if (m.status === "recognizing text") report("recognizing", readSpan[0] + (readSpan[1] - readSpan[0]) * m.progress);
         else report("loading_engine", m.progress);
       },
       // Called when any engine job fails. Without this, Tesseract.js throws the
@@ -145,7 +163,13 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
       // never settles if the LANGUAGE FILE fails to load (it swallows that
       // error), which would leave the scan stuck until the timeout.
       errorHandler: (error: unknown) => workerCrashed?.(error),
-    });
+    }, {
+      // Tesseract writes status notes ("Estimating resolution as 242", "Detected
+      // 4 diacritics") to its error output, which Chrome lists as extension
+      // "Errors". They're harmless; send them nowhere. (Init-only setting;
+      // a real Tesseract variable that Tesseract.js's types don't list.)
+      debug_file: "/dev/null",
+    } as Parameters<typeof createWorker>[3]);
     // If we gave up (cancel or timeout) before the engine finished starting,
     // stop it as soon as it does start.
     starting.then((w) => { if (finished) void w.terminate(); }, () => {});
@@ -165,20 +189,70 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
     report("loading_engine", 1);
     throwIfCancelled(signal);
 
+    // Page layout. Neither of Tesseract's two useful layouts wins on every photo,
+    // so the whole photo is read with BOTH and the results are merged (scene.ts):
+    //  - SINGLE_BLOCK (Tesseract.js's default, one block of text) reads a small,
+    //    clean sign in a busy photo ("WATERS RESIDENCE HALL") that AUTO garbles
+    //    into low-confidence pieces;
+    //  - AUTO (automatic page layout) reads tilted or scattered text (the
+    //    "Maple Street Bakery" sign) that SINGLE_BLOCK misses entirely.
+    // Junk from either read (brickwork, windows) is dropped by scene.ts.
+    const engine = worker;
+    async function setLayout(mode: PSM): Promise<void> {
+      try {
+        await waitFor(Promise.race([engine.setParameters({ tessedit_pageseg_mode: mode }), crashed]), signal, LOAD_TIMEOUT_MS, () =>
+          new OcrError("ENGINE_LOAD_FAILED", "The text reader took too long to start."));
+      } catch (error) {
+        throw toOcrError(error, "ENGINE_LOAD_FAILED");
+      }
+    }
+
     // 3. Recognize. { blocks: true } is required to get words and boxes.
-    let page: RawPage;
-    try {
-      const recognizing = worker.recognize(prepared.png, {}, { text: true, blocks: true });
-      const result = await waitFor(Promise.race([recognizing, crashed]), signal, RECOGNIZE_TIMEOUT_MS, () =>
-        new OcrError("RECOGNITION_FAILED", "Reading the text took too long."));
-      page = result.data as RawPage;
-    } catch (error) {
-      throw toOcrError(error, "RECOGNITION_FAILED");
+    async function recognize(png: Blob): Promise<RawPage> {
+      try {
+        const recognizing = engine.recognize(png, {}, { text: true, blocks: true });
+        const result = await waitFor(Promise.race([recognizing, crashed]), signal, RECOGNIZE_TIMEOUT_MS, () =>
+          new OcrError("RECOGNITION_FAILED", "Reading the text took too long."));
+        const page = result.data as RawPage;
+        // A broken result must never look like "no text" (same rule as convert.ts).
+        if (!page || !Array.isArray(page.blocks)) throw new OcrError("RECOGNITION_FAILED", "The text reader returned no word list.");
+        return page;
+      } catch (error) {
+        throw toOcrError(error, "RECOGNITION_FAILED");
+      }
+    }
+    // Whole photo, both layouts (see above). SINGLE_BLOCK first: combineReads
+    // trusts earlier reads, and only adds AUTO's lines and clear words that are new.
+    readSpan = [0, 0.35];
+    await setLayout(PSM.SINGLE_BLOCK);
+    const reads: Read[] = [{ page: await recognize(prepared.png), scale: 1 }];
+    readSpan = [0.35, 0.7];
+    await setLayout(PSM.AUTO); // also used for the zoomed crops below
+    reads.push({ page: await recognize(prepared.png), scale: 1 });
+    let combined = combineReads(reads); // only the clearly readable lines (scene.ts)
+
+    // Zoom in on small text (e.g. a sign on a building): read an enlarged crop
+    // around it, which finds words the whole-photo read missed.
+    const regions = zoomRegions(combined.page, prepared.width, prepared.height);
+    if (regions.length > 0) {
+      const photo = await createImageBitmap(prepared.png);
+      try {
+        for (const [i, region] of regions.entries()) {
+          throwIfCancelled(signal);
+          readSpan = [0.7 + (0.3 * i) / regions.length, 0.7 + (0.3 * (i + 1)) / regions.length];
+          const page = await recognize(await zoomInto(photo, region));
+          reads.push({ page, scale: region.factor, offset: { x: region.x, y: region.y } });
+        }
+      } finally {
+        photo.close();
+      }
+      combined = combineReads(reads);
     }
     report("recognizing", 1);
 
     // 4. Convert. Throws RECOGNITION_FAILED if the output is unusable.
-    return pageToOcrResult(page, index, prepared.width, prepared.height, ENGINE_NAME);
+    const result = pageToOcrResult(combined.page, index, prepared.width, prepared.height, ENGINE_NAME);
+    return combined.droppedWords > 0 ? { ...result, droppedWords: combined.droppedWords } : result;
   } finally {
     // Always stop the worker: frees memory and stops work after a cancel.
     finished = true;

@@ -26,6 +26,8 @@ const app = createApp({
     config.mode === "mock"
       ? async (sources) => mockAnalyze(sources)
       : async (sources) => parseModelOutput(await callDatabricks(buildMessages(sources)), sources),
+  // The profile scan needs the live AI; in practice mode it is refused (never faked).
+  extractFacts: config.mode === "mock" ? null : (messages) => callDatabricks(messages),
   historyStore,
   getDatabricksStatus,
   allowedExtensionId: config.allowedExtensionId,

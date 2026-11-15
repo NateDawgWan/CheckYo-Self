@@ -10,7 +10,7 @@
 // can't change Instagram's page. It sits OUTSIDE Instagram's own dialog.
 import type { AnalyzeResponse, TextSource } from "../../../shared/contract";
 import { PHOTO_TEXT_MAX_CHARS } from "../photo-text";
-import type { MessageKind, PhotoView, WarningPanel, WarningPanelActions } from "../ports";
+import type { CompareView, MessageKind, PhotoView, WarningPanel, WarningPanelActions } from "../ports";
 import { renderResults, type ResultElements } from "../render";
 import { renderVerdict, type VerdictElements } from "../verdict";
 // The popup's stylesheet, bundled as text by esbuild (see build.mjs).
@@ -38,6 +38,16 @@ const PANEL_CSS = `
 .photos-note { margin: 8px 0; padding: 8px 10px; border: 2px solid var(--asphalt, #151515); background: var(--amber, #f0a43a); color: var(--asphalt, #151515); font-weight: 700; font-size: 13px; }
 .photos-note.is-done { background: var(--lime, #d6f04a); }
 .photos-note[hidden] { display: none; }
+.save-card {
+  position: fixed; right: 20px; bottom: 20px; z-index: 2147483647; width: 340px; max-width: calc(100vw - 40px);
+  padding: 12px 14px; background: var(--paper); border: 2px solid var(--asphalt, #151515); box-shadow: 4px 4px 0 var(--asphalt, #151515);
+  font: 13.5px/1.45 var(--ui-font); color: var(--ink);
+}
+.save-card[hidden], .save-buttons[hidden] { display: none; }
+.save-card[data-state="ok"] { background: var(--lime, #d6f04a); }
+.save-card[data-state="error"] { background: var(--high-mark, #f9d3cf); }
+.save-text { margin: 0 0 8px; }
+.save-buttons { display: flex; gap: 8px; justify-content: flex-end; }
 .intro { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .share-ready { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--low-mark); color: var(--low); font-weight: 600; }
 .actions { flex-wrap: wrap; }
@@ -159,8 +169,45 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
 
   const resultEls: ResultElements = { root: results, summary, markedDraft, findings, meta, mockBanner, incompleteBanner };
 
-  panel.append(head, intro, photosNote, photoBlocks, consent, buttonRow, shareReady, message, results);
-  shadow.append(style, launcher, panel);
+  // Optional "Compare with my past posts" (closed by default; same look as the popup's).
+  const compare = el("div", "compare");
+  const compareToggle = button("+ Compare with my past posts (optional)", "link-button", () => actions.onCompareToggle(comparePanel.hidden));
+  compareToggle.setAttribute("aria-expanded", "false");
+  const comparePanel = el("div", "compare-panel");
+  comparePanel.hidden = true;
+  const compareHint = el(
+    "p",
+    "hint",
+    "Check this post together with earlier posts you saved, to spot what they reveal together (for example a first name in one post and a last name in another). Only what you tick is used.",
+  );
+  const profileRow = el("label", "compare-profile");
+  const profileBox = el("input");
+  profileBox.type = "checkbox";
+  profileBox.addEventListener("change", () => actions.onUseProfile(profileBox.checked));
+  const profileLabel = el("span");
+  profileRow.append(profileBox, profileLabel);
+  const compareStatus = el("p", "hint");
+  compareStatus.setAttribute("role", "status");
+  const compareList = el("ul", "compare-list");
+  const compareLinks = el("p", "compare-links");
+  compareLinks.append(button("Manage or import past posts", "secondary small", () => actions.onOpenHistory()));
+  comparePanel.append(compareHint, profileRow, compareStatus, compareList, compareLinks);
+  compare.append(compareToggle, comparePanel);
+
+  panel.append(head, intro, photosNote, photoBlocks, compare, consent, buttonRow, shareReady, message, results);
+  // "Save this post to your history?" after a confirmed share. Never automatic.
+  const saveCard = el("section", "save-card");
+  saveCard.hidden = true;
+  saveCard.setAttribute("role", "dialog");
+  saveCard.setAttribute("aria-label", "Save to CheckYo'Self history");
+  const saveText = el("p", "save-text");
+  const saveButtons = el("div", "save-buttons");
+  const saveYes = button("Save to history", "primary small", () => actions.onSaveToHistory());
+  const saveNo = button("No thanks", "secondary small", () => actions.onSkipSave());
+  saveButtons.append(saveNo, saveYes);
+  saveCard.append(saveText, saveButtons);
+
+  shadow.append(style, launcher, panel, saveCard);
   document.documentElement.append(host);
 
   let hasResult = false;
@@ -272,6 +319,45 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       shareReady.hidden = !ready;
       isShareReady = ready;
       updateLauncherText();
+    },
+    setSavePrompt(state) {
+      saveCard.hidden = state.kind === "hidden";
+      saveButtons.hidden = state.kind !== "ask";
+      saveCard.dataset.state = state.kind === "done" ? (state.ok ? "ok" : "error") : state.kind;
+      saveText.textContent =
+        state.kind === "ask"
+          ? "Posted. Save it to your CheckYo'Self history? Later checks can then spot what your posts reveal together. Only the caption and photo text are saved; delete it any time."
+          : state.kind === "saving"
+            ? "Saving…"
+            : state.kind === "done"
+              ? state.text
+              : "";
+    },
+    setCompare(view: CompareView) {
+      comparePanel.hidden = !view.open;
+      compareToggle.setAttribute("aria-expanded", String(view.open));
+      compareToggle.textContent = view.open ? "− Don't compare with past posts" : "+ Compare with my past posts (optional)";
+      compareStatus.textContent = view.status;
+      compareStatus.dataset.kind = view.error ? "error" : "info";
+      profileRow.hidden = view.profile === null;
+      if (view.profile) {
+        profileLabel.textContent = view.profile.label;
+        profileBox.checked = view.profile.checked;
+      }
+      // textContent only: captions come from the user's posts.
+      compareList.replaceChildren(
+        ...view.items.map((item) => {
+          const li = el("li");
+          const label = el("label");
+          const box = el("input");
+          box.type = "checkbox";
+          box.checked = item.checked;
+          box.addEventListener("change", () => actions.onComparePick(item.postId, box.checked));
+          label.append(box, el("span", "compare-caption", item.caption || "(no caption)"), el("span", "compare-meta", item.meta));
+          li.append(label);
+          return li;
+        }),
+      );
     },
     setLauncherPrompt(text) {
       launcherPrompt = text;

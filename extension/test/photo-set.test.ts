@@ -94,3 +94,7 @@ test("carousel prompt: asks to click through until the last photo is shown and r
   assert.match(done.launcher, /all 3 photos read/);
   assert.match(done.banner, /All 3 photos read ✓/);
 });
+
+test("the profile is labeled as such in findings", () => {
+  assert.equal(sourceLabel(undefined, "profile"), "Your past posts (profile)");
+});

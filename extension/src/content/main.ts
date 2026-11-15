@@ -13,6 +13,9 @@
 // share-flow.ts, which is unit-tested.
 import type {
   BackendStatusReply,
+  HistorySuggestionsReply,
+  StoredHistoryPost,
+  SaveToHistoryReply,
   CheckDraftReply,
   ExtensionMessage,
   InstagramDraftReply,
@@ -22,9 +25,10 @@ import type {
 import { hashSources } from "../api";
 import { applyEditToText } from "../edits";
 import { describePhotoRead, PHOTO_TEXT_MAX_CHARS } from "../photo-text";
-import type { OcrPort, WarningPanel, WarningPanelActions } from "../ports";
+import type { CompareView, OcrPort, WarningPanel, WarningPanelActions } from "../ports";
 import { offscreenOcr } from "./offscreen-ocr";
 import { carouselProgress, PhotoSet } from "./photo-set";
+import { historySourcesFor, preselect, suggestionMeta } from "../compare";
 import {
   detectPublishOutcome,
   readComposer,
@@ -71,6 +75,16 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   let queueRunning = false;
   let reachedLastSlide = false; // the carousel's last photo was shown (no "next" arrow)
   let sharedDraftHash: Promise<string> | null = null; // hash of the draft that was shared
+  let sharedPost: { caption: string; imageText: string } | null = null; // its text, for "Save to history?"
+  let pendingSave: { caption: string; imageText: string; publishedAt: string } | null = null;
+  let saveHideTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // The panel's optional "Compare with my past posts" (closed by default).
+  let compareOpen = false;
+  const comparePicked = new Set<string>();
+  let useProfile = true;
+  let profileFacts = 0;
+  let compareSuggestions: Extract<HistorySuggestionsReply, { kind: "history-suggestions" }>["suggestions"] = [];
 
   // -------------------------------------------------------------------------
   // The draft
@@ -112,6 +126,11 @@ export function startInstagramIntegration(options: IntegrationOptions) {
         reachedLastSlide = false;
         panel?.setPhotos([], { text: "", done: false });
         panel?.setLauncherPrompt(null);
+        // A new post starts with Compare closed again (it's never forced).
+        compareOpen = false;
+        comparePicked.clear();
+        compareSuggestions = [];
+        panel?.setCompare(compareView("", false));
         panel?.clearResult();
         panel?.setStale(false);
       }
@@ -279,11 +298,107 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     onApplyEdit(edit) {
       void applyEdit(edit);
     },
+    onCompareToggle(open) {
+      compareOpen = open;
+      if (open) void loadCompare();
+      else getPanel().setCompare(compareView("", false));
+    },
+    onComparePick(postId, picked) {
+      if (picked) comparePicked.add(postId);
+      else comparePicked.delete(postId);
+    },
+    onUseProfile(use) {
+      useProfile = use;
+    },
+    onOpenHistory() {
+      const message: ExtensionMessage = { kind: "open-history-page" };
+      chrome.runtime.sendMessage(message).catch(() => undefined);
+    },
+    onSaveToHistory() {
+      void saveSharedPost();
+    },
+    onSkipSave() {
+      pendingSave = null;
+      getPanel().setSavePrompt({ kind: "hidden" });
+    },
     onImageTextInput(text, index) {
       photos.setTyped(index, text);
       draftChanged();
     },
   };
+
+  function shortDate(iso: string): string {
+    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  /** What the Compare section shows right now. */
+  function compareView(status: string, error: boolean): CompareView {
+    return {
+      open: compareOpen,
+      status,
+      error,
+      profile:
+        compareOpen && profileFacts > 0
+          ? { label: `Use my profile: ${profileFacts} fact${profileFacts === 1 ? "" : "s"} from my saved posts (finds links even without shared words)`, checked: useProfile }
+          : null,
+      items: compareOpen
+        ? compareSuggestions.map((s) => ({ postId: s.postId, caption: s.caption, meta: suggestionMeta(s, shortDate), checked: comparePicked.has(s.postId) }))
+        : [],
+    };
+  }
+
+  /** Opened Compare: ask the worker which saved posts look related (no AI call). */
+  async function loadCompare() {
+    const p = getPanel();
+    p.setCompare(compareView("Looking for related past posts…", false));
+    let reply: HistorySuggestionsReply | { kind: "rejected"; reason: string } | undefined;
+    try {
+      const message: ExtensionMessage = { kind: "get-history-suggestions", sources: currentSources().filter((s) => s.text.trim()) };
+      reply = await chrome.runtime.sendMessage(message);
+    } catch {
+      reply = undefined;
+    }
+    if (!compareOpen) return; // closed meanwhile
+    if (reply?.kind !== "history-suggestions") {
+      const why = reply?.kind === "history-error" ? reply.message : reply?.kind === "rejected" ? reply.reason : "CheckYo'Self was reloaded. Refresh this page.";
+      p.setCompare(compareView(why, true));
+      return;
+    }
+    compareSuggestions = reply.suggestions;
+    profileFacts = reply.profile.facts;
+    comparePicked.clear();
+    for (const id of preselect(reply.suggestions)) comparePicked.add(id);
+    const status =
+      reply.savedPosts === 0
+        ? "You haven't saved any past posts yet. Import some (button below), or save posts after you share them."
+        : comparePicked.size > 0
+          ? `${comparePicked.size} of your ${reply.savedPosts} saved posts look related and are ticked. Untick any you don't want included.`
+          : `None of your ${reply.savedPosts} saved posts share words with this post. Tick any you want to include anyway.`;
+    p.setCompare(compareView(status, false));
+  }
+
+  /** The user clicked "Save to history" on the after-share card. */
+  async function saveSharedPost() {
+    const p = getPanel();
+    if (!pendingSave) return p.setSavePrompt({ kind: "hidden" });
+    const message: ExtensionMessage = { kind: "save-to-history", ...pendingSave };
+    p.setSavePrompt({ kind: "saving" });
+    let reply: SaveToHistoryReply | { kind: "rejected"; reason: string } | undefined;
+    try {
+      reply = await chrome.runtime.sendMessage(message);
+    } catch {
+      reply = undefined;
+    }
+    if (reply?.kind === "history-saved") {
+      pendingSave = null;
+      p.setSavePrompt({ kind: "done", ok: true, text: "Saved to your history ✓ Manage it from the CheckYo'Self popup → Your past posts." });
+      saveHideTimer = setTimeout(() => p.setSavePrompt({ kind: "hidden" }), 6000);
+    } else {
+      const why = reply?.kind === "history-error" ? reply.message : reply?.kind === "rejected" ? reply.reason : "CheckYo'Self was reloaded. Refresh this page.";
+      p.setSavePrompt({ kind: "done", ok: false, text: `Couldn't save it: ${why}` });
+      saveHideTimer = setTimeout(() => p.setSavePrompt({ kind: "hidden" }), 10000);
+    }
+  }
 
   async function checkDraft() {
     snapshot = readComposer(document);
@@ -324,6 +439,11 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     try {
       const draftHash = await hashSources(sources);
       const message: ExtensionMessage = { kind: "check-draft", requestId, draftHash, sources };
+      // Opt-in: the posts ticked in Compare, and/or the profile.
+      if (compareOpen) {
+        if (comparePicked.size) message.historyPostIds = [...comparePicked];
+        if (useProfile && profileFacts > 0) message.usePortfolio = true;
+      }
       reply = await chrome.runtime.sendMessage(message);
     } catch {
       reply = { kind: "check-error", requestId, message: "CheckYo'Self was reloaded. Refresh this page and try again." };
@@ -336,14 +456,23 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     } else if (reply.kind === "check-error") {
       if (flow.receiveError(reply.requestId) === "accepted") p.setMessage(reply.message, "error");
     } else if (flow.receiveResult(reply.requestId, reply.result) === "accepted") {
-      p.showResult(reply.result, sources);
+      // Show (and highlight) the earlier posts the check used, after the draft.
+      const asStored: StoredHistoryPost[] = compareSuggestions.map((s) => ({
+        postId: s.postId, status: "published", publishedAt: s.publishedAt, caption: s.caption,
+        ...(s.imageText ? { imageText: s.imageText } : {}), approvalId: "", importedAt: "",
+      }));
+      p.showResult(reply.result, [...sources, ...historySourcesFor(reply.result, asStored)]);
       const n = reply.result.findings.length;
+      const parts: string[] = [];
+      if (reply.result.historyUsed.length) parts.push(`${reply.result.historyUsed.length} past post${reply.result.historyUsed.length === 1 ? "" : "s"}`);
+      if (reply.result.portfolioUsed) parts.push(`your profile (${reply.result.portfolioUsed.facts} facts)`);
+      const compared = parts.length ? ` Compared with ${parts.join(" and ")}.` : "";
       if (reply.result.droppedFindings > 0) {
-        p.setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${reply.result.droppedFindings} not shown.${unseenWarning}`, "error");
+        p.setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${reply.result.droppedFindings} not shown.${unseenWarning}${compared}`, "error");
       } else if (unseenWarning) {
-        p.setMessage(`Check incomplete:${unseenWarning}`, "error");
+        p.setMessage(`Check incomplete:${unseenWarning}${compared}`, "error");
       } else {
-        p.setMessage(n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`);
+        p.setMessage((n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`) + compared);
       }
     }
     // An "outdated" reply is ignored on purpose: the draft changed while we waited.
@@ -427,6 +556,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       // The user's own click goes through to Instagram, untouched.
       snapshot = readComposer(document);
       sharedDraftHash = hashSources(currentSources());
+      sharedPost = { caption: snapshot.caption, imageText: photos.joinedText() };
       const p = getPanel();
       p.setShareReady(false);
       p.close();
@@ -486,7 +616,15 @@ export function startInstagramIntegration(options: IntegrationOptions) {
 
   async function reportOutcome(outcome: PublishOutcome) {
     console.info(`[CheckYo'Self] Share outcome: ${outcome}`);
+    const post = sharedPost;
+    sharedPost = null;
     if (outcome !== "published" || !sharedDraftHash) return; // only CONFIRMED posts count
+    // Ask (never automatic) whether to save it to history.
+    if (post && (post.caption.trim() || post.imageText.trim())) {
+      pendingSave = { ...post, publishedAt: new Date().toISOString() };
+      clearTimeout(saveHideTimer);
+      getPanel().setSavePrompt({ kind: "ask" });
+    }
     const message: ExtensionMessage = {
       kind: "post-published",
       draftHash: await sharedDraftHash,

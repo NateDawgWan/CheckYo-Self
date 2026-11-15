@@ -72,6 +72,29 @@
         <label class="step" for="caption"><span class="step-num">03</span> Caption</label>
         <textarea id="caption" rows="4" placeholder="Write or paste a caption"></textarea>
 
+        <!-- Optional: check together with earlier posts the user saved (closed by default). -->
+        <div class="compare">
+          <button id="compare-toggle" type="button" class="link-button" aria-expanded="false" aria-controls="compare-panel">
+            + Compare with my past posts <span class="optional">(optional)</span>
+          </button>
+          <div id="compare-panel" class="compare-panel" hidden>
+            <p class="hint">
+              Check this post together with earlier posts you saved, to spot what they reveal <em>together</em>
+              (for example a school in one post and a pickup time in another). Only the posts you tick are used.
+            </p>
+            <label class="compare-profile" hidden id="compare-profile-row">
+              <input id="compare-profile" type="checkbox" checked />
+              <span id="compare-profile-label">Use my profile (facts from all my saved posts)</span>
+            </label>
+            <p id="compare-status" class="hint" role="status" aria-live="polite"></p>
+            <ul id="compare-list" class="compare-list"></ul>
+            <p class="compare-links">
+              <button id="compare-refresh" type="button" class="secondary small">Update suggestions</button>
+              <a href="history.html" target="_blank">Manage or import past posts →</a>
+            </p>
+          </div>
+        </div>
+
         <div class="actions">
           <div class="actions-secondary">
             <button id="load-sample" type="button" class="secondary">Use sample post</button>
@@ -118,6 +141,7 @@
 
         <p id="meta" class="meta"></p>
       </section>
+      <p class="history-link"><a href="history.html" target="_blank">Your past posts (history) →</a></p>
     </main>
 
     <footer class="colophon" aria-hidden="true">

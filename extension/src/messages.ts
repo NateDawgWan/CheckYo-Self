@@ -6,10 +6,11 @@
 // ever confused it, we still want the worker to send ONLY plain text to our
 // backend: never images, image URLs, blob: URLs or base64 data. The backend
 // checks this too (backend/src/validate.ts); this is a second, earlier check.
-import { LIMITS, type ExtensionMessage, type SourceType, type TextSource } from "../../shared/contract";
+import { HISTORY_LIMITS, LIMITS, type ExtensionMessage, type SourceType, type TextSource } from "../../shared/contract";
 
 const SOURCE_TYPES: SourceType[] = ["caption", "image_text", "history"];
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
+const POST_ID = /^[A-Za-z0-9_.-]{1,80}$/; // same as the backend's POST_ID_PATTERN
 
 // Same idea as backend/src/validate.ts, plus blob: URLs (which only exist in the browser).
 const IMAGE_DATA_URL = /data:image\//i;
@@ -77,8 +78,37 @@ export function parseExtensionMessage(raw: unknown): Parsed<ExtensionMessage> {
         if (!parsed.ok) return parsed;
         clean.push(parsed.value);
       }
-      return { ok: true, value: { kind: "check-draft", requestId, draftHash, sources: clean } };
+      const value: Extract<ExtensionMessage, { kind: "check-draft" }> = { kind: "check-draft", requestId, draftHash, sources: clean };
+      // Optional (the panel's Compare section).
+      const { historyPostIds, usePortfolio } = raw;
+      if (historyPostIds !== undefined) {
+        if (!Array.isArray(historyPostIds) || historyPostIds.length > HISTORY_LIMITS.maxPostsPerAnalysis || !historyPostIds.every((id) => typeof id === "string" && POST_ID.test(id))) {
+          return { ok: false, reason: `historyPostIds must be up to ${HISTORY_LIMITS.maxPostsPerAnalysis} post ids.` };
+        }
+        if (historyPostIds.length) value.historyPostIds = [...new Set(historyPostIds as string[])];
+      }
+      if (usePortfolio !== undefined) {
+        if (typeof usePortfolio !== "boolean") return { ok: false, reason: "usePortfolio must be true or false." };
+        if (usePortfolio) value.usePortfolio = true;
+      }
+      return { ok: true, value };
     }
+
+    case "get-history-suggestions": {
+      const { sources } = raw;
+      if (!Array.isArray(sources) || sources.length > LIMITS.maxSources) return { ok: false, reason: "sources must be a list." };
+      const clean: TextSource[] = [];
+      for (let i = 0; i < sources.length; i++) {
+        const parsed = parseSource(sources[i], i);
+        if (!parsed.ok) return parsed;
+        if (parsed.value.type === "history") return { ok: false, reason: "Only the draft can be sent." };
+        if (parsed.value.text.trim()) clean.push(parsed.value);
+      }
+      return { ok: true, value: { kind: "get-history-suggestions", sources: clean } };
+    }
+
+    case "open-history-page":
+      return { ok: true, value: { kind: "open-history-page" } };
 
     case "post-published": {
       const { draftHash, postId, publishedAt } = raw;
@@ -99,6 +129,25 @@ export function parseExtensionMessage(raw: unknown): Parsed<ExtensionMessage> {
 
     case "get-backend-status":
       return { ok: true, value: { kind: "get-backend-status" } };
+
+    case "save-to-history": {
+      const { caption, imageText, publishedAt } = raw;
+      if (typeof caption !== "string" || typeof imageText !== "string") {
+        return { ok: false, reason: "caption and imageText must be text." };
+      }
+      if (!caption.trim() && !imageText.trim()) return { ok: false, reason: "There's nothing to save." };
+      for (const [what, text] of [["The caption", caption], ["The photo text", imageText]] as const) {
+        if (text.length > HISTORY_LIMITS.maxCharsPerPost) {
+          return { ok: false, reason: `${what} is too long to save (max ${HISTORY_LIMITS.maxCharsPerPost} characters).` };
+        }
+        const problem = nonTextProblem(text);
+        if (problem) return { ok: false, reason: `${what} ${problem}. Only text can be saved.` };
+      }
+      if (typeof publishedAt !== "string" || Number.isNaN(Date.parse(publishedAt)) || Date.parse(publishedAt) > Date.now() + 5 * 60_000) {
+        return { ok: false, reason: "publishedAt must be an ISO 8601 date, not in the future." };
+      }
+      return { ok: true, value: { kind: "save-to-history", caption, imageText, publishedAt } };
+    }
 
     default:
       return { ok: false, reason: "Unknown message kind." };
