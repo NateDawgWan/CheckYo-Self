@@ -590,3 +590,7 @@ mark.flash, .finding.flash { animation: flash 1.2s ease-out; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   mark.flash, .finding.flash { outline: 3px solid var(--lime); }
 }
+
+/* Link to the history page (history.html). */
+.history-link { margin: 14px 0 0; font: 600 12px/1.2 var(--mono, monospace); text-transform: uppercase; letter-spacing: 0.06em; }
+.history-link a { color: var(--ink); }
