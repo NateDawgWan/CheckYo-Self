@@ -142,7 +142,7 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
   const crashed = new Promise<never>((_, reject) => { workerCrashed = reject; });
   crashed.catch(() => {}); // only matters if someone is waiting on it
 
-  // Progress of "recognizing": the whole-photo read is 0-70%, zoomed crops (if any) 70-100%.
+  // Progress of "recognizing": the two whole-photo reads are 0-35% and 35-70%, zoomed crops (if any) 70-100%.
   let readSpan: [number, number] = [0, 0.7];
 
   try {
@@ -163,7 +163,13 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
       // never settles if the LANGUAGE FILE fails to load (it swallows that
       // error), which would leave the scan stuck until the timeout.
       errorHandler: (error: unknown) => workerCrashed?.(error),
-    });
+    }, {
+      // Tesseract writes status notes ("Estimating resolution as 242", "Detected
+      // 4 diacritics") to its error output, which Chrome lists as extension
+      // "Errors". They're harmless; send them nowhere. (Init-only setting;
+      // a real Tesseract variable that Tesseract.js's types don't list.)
+      debug_file: "/dev/null",
+    } as Parameters<typeof createWorker>[3]);
     // If we gave up (cancel or timeout) before the engine finished starting,
     // stop it as soon as it does start.
     starting.then((w) => { if (finished) void w.terminate(); }, () => {});
@@ -183,15 +189,22 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
     report("loading_engine", 1);
     throwIfCancelled(signal);
 
-    // Automatic page layout. Without this Tesseract assumes ONE block of text
-    // (a scanned page), and on an everyday photo it turns brickwork and
-    // windows into junk "words" while missing the sign in the corner.
+    // Page layout. Neither of Tesseract's two useful layouts wins on every photo,
+    // so the whole photo is read with BOTH and the results are merged (scene.ts):
+    //  - SINGLE_BLOCK (Tesseract.js's default, one block of text) reads a small,
+    //    clean sign in a busy photo ("WATERS RESIDENCE HALL") that AUTO garbles
+    //    into low-confidence pieces;
+    //  - AUTO (automatic page layout) reads tilted or scattered text (the
+    //    "Maple Street Bakery" sign) that SINGLE_BLOCK misses entirely.
+    // Junk from either read (brickwork, windows) is dropped by scene.ts.
     const engine = worker;
-    try {
-      await waitFor(Promise.race([engine.setParameters({ tessedit_pageseg_mode: PSM.AUTO }), crashed]), signal, LOAD_TIMEOUT_MS, () =>
-        new OcrError("ENGINE_LOAD_FAILED", "The text reader took too long to start."));
-    } catch (error) {
-      throw toOcrError(error, "ENGINE_LOAD_FAILED");
+    async function setLayout(mode: PSM): Promise<void> {
+      try {
+        await waitFor(Promise.race([engine.setParameters({ tessedit_pageseg_mode: mode }), crashed]), signal, LOAD_TIMEOUT_MS, () =>
+          new OcrError("ENGINE_LOAD_FAILED", "The text reader took too long to start."));
+      } catch (error) {
+        throw toOcrError(error, "ENGINE_LOAD_FAILED");
+      }
     }
 
     // 3. Recognize. { blocks: true } is required to get words and boxes.
@@ -208,7 +221,14 @@ export async function readImageText(image: Blob, index: number, options: ReadIma
         throw toOcrError(error, "RECOGNITION_FAILED");
       }
     }
+    // Whole photo, both layouts (see above). SINGLE_BLOCK first: combineReads
+    // trusts earlier reads, and only adds AUTO's lines and clear words that are new.
+    readSpan = [0, 0.35];
+    await setLayout(PSM.SINGLE_BLOCK);
     const reads: Read[] = [{ page: await recognize(prepared.png), scale: 1 }];
+    readSpan = [0.35, 0.7];
+    await setLayout(PSM.AUTO); // also used for the zoomed crops below
+    reads.push({ page: await recognize(prepared.png), scale: 1 });
     let combined = combineReads(reads); // only the clearly readable lines (scene.ts)
 
     // Zoom in on small text (e.g. a sign on a building): read an enlarged crop

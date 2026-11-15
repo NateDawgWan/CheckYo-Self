@@ -29,16 +29,25 @@ function check(ok: boolean, label: string): void {
   if (!ok) failures++;
 }
 
-const worker = await createWorker("eng", 1, { langPath: LANG_DIR, cacheMethod: "none", gzip: true });
-await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO }); // same as engine.ts
+// debug_file: same as engine.ts (silences "Estimating resolution..." notes).
+const worker = await createWorker("eng", 1, { langPath: LANG_DIR, cacheMethod: "none", gzip: true }, { debug_file: "/dev/null" } as Parameters<typeof createWorker>[3]);
 
-// Same steps as engine.ts, except zooming in on small text (needs a browser canvas;
-// the demo images' text is big enough not to need it).
+/** One whole-photo read with the given page layout. */
+async function read(bytes: Buffer, mode: PSM): Promise<RawPage> {
+  await worker.setParameters({ tessedit_pageseg_mode: mode });
+  return (await worker.recognize(bytes, {}, { text: true, blocks: true })).data as RawPage;
+}
+
+// Same steps as engine.ts (SINGLE_BLOCK and AUTO, merged), except zooming in on
+// small text (needs a browser canvas).
 async function scan(name: string): Promise<OcrResult> {
   const bytes = readFileSync(`${IMAGES}/${name}`);
   const { width, height } = pngSize(bytes);
-  const { data } = await worker.recognize(bytes, {}, { text: true, blocks: true });
-  const result = pageToOcrResult(combineReads([{ page: data as RawPage, scale: 1 }]).page, 1, width, height, "check-ocr");
+  const reads = [
+    { page: await read(bytes, PSM.SINGLE_BLOCK), scale: 1 },
+    { page: await read(bytes, PSM.AUTO), scale: 1 },
+  ];
+  const result = pageToOcrResult(combineReads(reads).page, 1, width, height, "check-ocr");
   console.log(`\n${name}: status=${result.status}, ${result.words.length} words, confidence=${result.confidence}`);
   console.log(`  text: ${JSON.stringify(result.text)}`);
   return result;
@@ -63,9 +72,17 @@ try {
   check(blank.status === "no_text" || blank.words.every((w) => w.confidence < 70),
     "no-text: empty, or only low-confidence noise for the user to delete");
 
-  // 3. A slightly tilted sign: readable since automatic page layout (PSM.AUTO).
+  // 3. A slightly tilted sign: read by the automatic page layout (PSM.AUTO) read.
   const rotated = await scan("rotated-sign.png");
   check(locateQuote(rotated, "Maple Street Bakery").found, "rotated: \"Maple Street Bakery\" read");
+
+  // 3b. A SMALL, clean sign on a busy brick building: AUTO alone garbles it into
+  // low-confidence pieces (all dropped), the SINGLE_BLOCK read gets it right.
+  const sign = await scan("small-sign.png");
+  for (const quote of ["HOLLIS RESIDENCE HALL", "1400 LAKEVIEW DRIVE"]) {
+    check(locateQuote(sign, quote).found, `small sign: "${quote}" read`);
+  }
+  check(sign.words.length <= 8, `small sign: no junk from bricks or windows (${sign.words.length} words)`);
 
   // 4. Limitation: script lettering. Printed for information, not checked.
   await scan("script-card.png");
