@@ -58,7 +58,12 @@ const builds = [
   // Output names: dist/popup.js, dist/background.js, dist/ocr-demo.js
   {
     ...common,
-    entryPoints: { popup: "src/popup.ts", background: "src/background.ts", "ocr-demo": "src/ocr/demo/demo.ts" },
+    entryPoints: {
+      popup: "src/popup.ts",
+      background: "src/background.ts",
+      "ocr-demo": "src/ocr/demo/demo.ts",
+      dashboard: "src/dashboard/main.ts", // the full-page PrivacyGuard dashboard (public/dashboard.html)
+    },
     format: "esm",
   },
   // Content scripts can't be ES modules, so the Instagram script is one plain file.
