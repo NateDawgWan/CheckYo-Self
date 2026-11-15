@@ -2,7 +2,7 @@
 // edit the prompt, so you can tell which prompt produced a given result.
 import { CATEGORIES, EDIT_ACTIONS, type TextSource } from "../../shared/contract";
 
-export const PROMPT_VERSION = "2026-11-14.1";
+export const PROMPT_VERSION = "2026-11-14.2";
 
 export interface ChatMessage {
   role: "system" | "user";
@@ -22,8 +22,9 @@ Rules:
 2. Every evidence "quote" must be copied character-for-character from the "text" of the source named by "sourceId", and be short (under 120 characters).
 3. Do not invent facts. If something is an inference, say so in "uncertainty", and set "confidence" honestly.
 4. Do not flag harmless content. If nothing is notable, return an empty "findings" array.
-5. Suggested edits must be concrete. For caption text use "replace", "remove" or "generalize", with "original" copied exactly from the caption. For text inside the image use "crop_or_blur_image".
+5. Suggested edits must be concrete. For caption text use "replace", "remove" or "generalize", with "original" copied exactly from the caption. "replace" and "generalize" MUST include a non-empty "replacement"; to delete text use "remove". For text inside the image use "crop_or_blur_image".
 6. Return at most 8 findings, most severe first. Write for a non-expert, in plain language.
+7. "findings" must always be present as a JSON array (use [] when nothing is notable). Every finding needs at least one evidence quote.
 
 Respond with ONLY one JSON object (no markdown, no code fences, no extra text) of this shape:
 {

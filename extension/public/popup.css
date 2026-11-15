@@ -80,7 +80,10 @@ main { padding: 0 16px 16px; }
   color: var(--muted);
 }
 .status-pill[data-state="mock"] { background: var(--mock); color: var(--mock-ink); border-color: transparent; }
-.status-pill[data-state="databricks"] { color: var(--low); border-color: currentColor; }
+.status-pill[data-state="databricks-verified"] { color: var(--low); border-color: currentColor; }
+.status-pill[data-state="databricks-unverified"] { color: var(--medium); border-color: currentColor; border-style: dashed; }
+.status-pill[data-state="databricks-failing"],
+.status-pill[data-state="mismatch"],
 .status-pill[data-state="offline"] { color: var(--high); border-color: currentColor; }
 
 label { display: block; font-weight: 600; margin: 10px 0 4px; }
@@ -126,6 +129,7 @@ button:focus-visible, textarea:focus-visible, mark:focus-visible, .evidence butt
 
 .banner { margin: 0 0 10px; padding: 8px 10px; border-radius: 6px; font-size: 13px; }
 .banner-mock { background: var(--mock); color: var(--mock-ink); }
+.banner-incomplete { background: var(--high-mark); color: var(--high); border: 1px solid currentColor; }
 .banner-stale {
   display: flex; gap: 10px; align-items: center; justify-content: space-between;
   background: var(--stale); color: var(--stale-ink);

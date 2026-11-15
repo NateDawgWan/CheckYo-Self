@@ -1,6 +1,7 @@
 // Draws results on the page. SAFETY: text from the backend/LLM is only ever set
 // with textContent (never innerHTML), so a malicious caption can't inject HTML.
 import type { AnalyzeResponse, Finding, Level, SuggestedEdit, TextSource } from "../../shared/contract";
+import { canApplyEdit } from "./edits";
 
 /** Small helper: create an element with a class and optional text. */
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) {
@@ -102,15 +103,10 @@ function flash(node: Element | null) {
   node.classList.add("flash");
 }
 
+/** Show "Apply" only for complete edits that match the analyzed caption (see edits.ts). */
 function canApply(edit: SuggestedEdit, sourcesById: Map<string, TextSource>): boolean {
   const source = sourcesById.get(edit.sourceId);
-  return (
-    edit.sourceId === "caption" &&
-    ["replace", "remove", "generalize"].includes(edit.action) &&
-    !!edit.original &&
-    !!source &&
-    source.text.toLowerCase().includes(edit.original.toLowerCase())
-  );
+  return !!source && canApplyEdit(edit, source.text);
 }
 
 function describeEdit(edit: SuggestedEdit): string {
@@ -187,6 +183,17 @@ export interface ResultElements {
   findings: HTMLElement;
   meta: HTMLElement;
   mockBanner: HTMLElement;
+  incompleteBanner: HTMLElement;
+}
+
+/** Text for the "this check is incomplete" banner, or null if it is complete. */
+export function incompleteMessage(result: AnalyzeResponse): string | null {
+  const n = result.droppedFindings;
+  if (!n || n <= 0) return null;
+  return (
+    `Incomplete check: ${n} possible warning${n === 1 ? " was" : "s were"} not shown because ` +
+    `${n === 1 ? "it" : "they"} could not be checked against your text. Check again, or review the post yourself.`
+  );
 }
 
 export function renderResults(
@@ -198,6 +205,9 @@ export function renderResults(
   const sourcesById = new Map(sources.map((s) => [s.id, s]));
   els.root.hidden = false;
   els.mockBanner.hidden = result.mode !== "mock";
+  const incomplete = incompleteMessage(result);
+  els.incompleteBanner.hidden = incomplete === null;
+  els.incompleteBanner.textContent = incomplete ?? "";
   els.summary.textContent = result.summary;
 
   // Marked-up draft
@@ -211,7 +221,9 @@ export function renderResults(
 
   // Finding cards
   els.findings.replaceChildren();
-  if (result.findings.length === 0) {
+  // "Nothing stood out" only when the check is COMPLETE. If findings were
+  // dropped, the banner above explains that instead.
+  if (result.findings.length === 0 && incomplete === null) {
     els.findings.append(el("li", "empty", "Nothing stood out. You can still review the post yourself before sharing."));
   }
   for (const finding of result.findings) {

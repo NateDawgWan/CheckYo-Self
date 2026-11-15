@@ -10,7 +10,7 @@ import {
   type HealthResponse,
 } from "../../shared/contract";
 import { assertDatabricksConfig, config } from "./config";
-import { callDatabricks } from "./databricks";
+import { callDatabricks, getDatabricksStatus } from "./databricks";
 import { AppError } from "./errors";
 import { mockAnalyze } from "./mock";
 import { parseModelOutput } from "./parse";
@@ -24,7 +24,13 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "100kb" }));
 
 app.get("/api/health", (_req, res) => {
-  const body: HealthResponse = { ok: true, mode: config.mode, contractVersion: CONTRACT_VERSION };
+  const body: HealthResponse = {
+    ok: true,
+    mode: config.mode,
+    contractVersion: CONTRACT_VERSION,
+    // "configured_unverified" until a real Databricks call succeeds.
+    databricks: getDatabricksStatus(),
+  };
   res.json(body);
 });
 
@@ -58,12 +64,13 @@ app.post("/api/analyze", checkOrigin, async (req, res, next) => {
       analyzedAt: new Date().toISOString(),
       summary: result.summary,
       findings: result.findings,
+      droppedFindings: result.droppedFindings,
     };
 
     // Privacy: log ids and counts only — never the post text.
     console.log(
       `[${requestId}] mode=${config.mode} sources=${request.sources.length} ` +
-        `findings=${body.findings.length} ${Date.now() - startedAt}ms`,
+        `findings=${body.findings.length} dropped=${body.droppedFindings} ${Date.now() - startedAt}ms`,
     );
     res.json(body);
   } catch (err) {

@@ -63,7 +63,7 @@ const RULES: Rule[] = [
   },
 ];
 
-export function mockAnalyze(sources: TextSource[]): { summary: string; findings: Finding[] } {
+export function mockAnalyze(sources: TextSource[]): { summary: string; findings: Finding[]; droppedFindings: number } {
   const findings: Finding[] = [];
 
   for (const rule of RULES) {
@@ -114,5 +114,7 @@ export function mockAnalyze(sources: TextSource[]): { summary: string; findings:
         ? `${findings.length} keyword rule(s) matched your draft.`
         : "No keyword rules matched your draft.",
     findings: findings.slice(0, 8),
+    // Rules beyond the limit of 8 are not shown, so count them as dropped.
+    droppedFindings: Math.max(0, findings.length - 8),
   };
 }

@@ -23,6 +23,50 @@ export async function checkHealth(): Promise<HealthResponse | null> {
   }
 }
 
+/** What the status pill should say. Pure function (no DOM), so it can be tested. */
+export interface BackendStatusView {
+  state: "offline" | "mismatch" | "mock" | "databricks-unverified" | "databricks-verified" | "databricks-failing";
+  label: string;
+  title: string; // tooltip with more detail
+}
+
+export function describeBackendStatus(health: HealthResponse | null): BackendStatusView {
+  if (!health) {
+    return { state: "offline", label: "Backend offline", title: "Run `npm run dev` in the backend folder." };
+  }
+  if (health.contractVersion !== CONTRACT_VERSION || !health.databricks) {
+    return {
+      state: "mismatch",
+      label: "Version mismatch",
+      title: `Backend speaks contract "${health.contractVersion}", extension expects "${CONTRACT_VERSION}". Rebuild the extension and restart the backend.`,
+    };
+  }
+  if (health.mode === "mock") {
+    return { state: "mock", label: "Practice mode", title: "Keyword rules, not AI. Databricks is not used." };
+  }
+  switch (health.databricks.state) {
+    case "verified":
+      return {
+        state: "databricks-verified",
+        label: "Databricks connected",
+        title: `Last successful call: ${health.databricks.lastCallAt ?? "unknown"}.`,
+      };
+    case "failing":
+      return {
+        state: "databricks-failing",
+        label: "Databricks error",
+        title: health.databricks.lastError ?? "The last Databricks call failed.",
+      };
+    default:
+      // Settings are filled in, but no call has succeeded yet. That is NOT a verified connection.
+      return {
+        state: "databricks-unverified",
+        label: "Databricks not tested yet",
+        title: "Databricks settings are filled in, but no call has succeeded since the backend started. Run a check, or `npm run check:databricks`.",
+      };
+  }
+}
+
 /** SHA-256 of the draft text. Same text -> same hash; any edit -> different hash. */
 export async function hashSources(sources: TextSource[]): Promise<string> {
   const canonical = JSON.stringify(sources.map((s) => [s.id, s.text]));

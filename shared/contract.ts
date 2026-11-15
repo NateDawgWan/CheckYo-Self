@@ -6,7 +6,11 @@
 // Bump CONTRACT_VERSION whenever you make a breaking change.
 // =============================================================================
 
-export const CONTRACT_VERSION = "1" as const;
+// Version history:
+//   "1" milestone 1 import.
+//   "2" AnalyzeResponse.droppedFindings, HealthResponse.databricks,
+//       verified-evidence rule, validated suggested edits.
+export const CONTRACT_VERSION = "2" as const;
 
 /** Size limits. The backend rejects anything bigger. */
 export const LIMITS = {
@@ -93,6 +97,15 @@ export interface Evidence {
   verified: boolean;
 }
 
+/**
+ * A suggested change. The backend guarantees these rules (and the extension
+ * checks them again before showing an "Apply" button):
+ *  - "replace" / "generalize": `original` AND a non-blank `replacement` are set.
+ *  - "remove": `original` is set; `replacement` is not used.
+ *  - "crop_or_blur_image" / "other": advice only, never applied automatically.
+ * An edit from the model that breaks these rules is turned into "other"
+ * (advice only) so it can never delete text by accident.
+ */
 export interface SuggestedEdit {
   sourceId: string;
   action: EditAction;
@@ -107,8 +120,14 @@ export interface Finding {
   category: Category;
   severity: Level;
   exposure: string;           // what a stranger could learn
-  evidence: Evidence[];       // at least one entry
-  crossSource: boolean;       // true if evidence spans >1 source (backend-computed)
+  /**
+   * At least one entry has verified: true. The backend drops any finding
+   * without verified evidence (and counts it in droppedFindings).
+   * Unverified entries may still appear, labeled "not found in your text".
+   */
+  evidence: Evidence[];
+  /** true if VERIFIED evidence spans more than one source (backend-computed). */
+  crossSource: boolean;
   confidence: Level;
   uncertainty: string;        // why this might be wrong
   suggestedEdits: SuggestedEdit[];
@@ -126,6 +145,13 @@ export interface AnalyzeResponse {
   analyzedAt: string;         // ISO 8601
   summary: string;
   findings: Finding[];
+  /**
+   * How many findings the model returned that the backend did NOT show,
+   * because they were malformed, had no verified evidence, or went over the
+   * limit of 8. If this is > 0 the check is INCOMPLETE: the extension must
+   * not present it as "nothing stood out".
+   */
+  droppedFindings: number;
 }
 
 export type ErrorCode =
@@ -141,9 +167,28 @@ export interface ErrorResponse {
   error: { code: ErrorCode; message: string; requestId?: string };
 }
 
+/**
+ * What the backend knows about its Databricks connection. "Configured" only
+ * means the settings are filled in; it is NOT proof that they work.
+ *  - "not_used":              mock mode, Databricks is not called.
+ *  - "configured_unverified": settings present, no call has succeeded yet.
+ *  - "verified":              the most recent Databricks call succeeded.
+ *  - "failing":               the most recent Databricks call failed.
+ */
+export type DatabricksState = "not_used" | "configured_unverified" | "verified" | "failing";
+
+export interface DatabricksStatus {
+  state: DatabricksState;
+  /** ISO 8601 time of the most recent call, or null if none yet. */
+  lastCallAt: string | null;
+  /** Short, credential-free error message from the most recent failed call. */
+  lastError: string | null;
+}
+
 // GET /api/health
 export interface HealthResponse {
   ok: true;
   mode: AnalysisMode;
   contractVersion: typeof CONTRACT_VERSION;
+  databricks: DatabricksStatus;
 }

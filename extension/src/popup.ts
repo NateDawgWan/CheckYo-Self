@@ -2,7 +2,8 @@
 // send it to the backend, show the findings, and mark them out of date
 // as soon as the draft changes.
 import type { AnalyzeResponse, SuggestedEdit, TextSource } from "../../shared/contract";
-import { analyzeDraft, checkHealth, hashSources } from "./api";
+import { analyzeDraft, checkHealth, describeBackendStatus, hashSources } from "./api";
+import { applyEditToText } from "./edits";
 import { renderResults, type ResultElements } from "./render";
 
 const SAMPLE_CAPTION =
@@ -31,6 +32,7 @@ const resultEls: ResultElements = {
   findings: byId("findings"),
   meta: byId("meta"),
   mockBanner: byId("mock-banner"),
+  incompleteBanner: byId("incomplete-banner"),
 };
 
 /** The last result we showed, plus the exact text it was about. */
@@ -78,46 +80,48 @@ async function analyze() {
     lastResult = result;
     renderResults(resultEls, result, sources, applyEdit);
     const n = result.findings.length;
-    setMessage(n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`);
+    if (result.droppedFindings > 0) {
+      // Some warnings could not be checked, so don't call this "complete".
+      setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${result.droppedFindings} not shown.`, "error");
+    } else {
+      setMessage(n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`);
+    }
     await updateStaleness(); // the user may have typed while we waited
   } catch (err) {
     setMessage((err as Error).message, "error");
   } finally {
     analyzeButton.disabled = false;
     reanalyzeButton.disabled = false;
+    // A Databricks call just succeeded or failed, so the status may have changed.
+    showBackendStatus();
   }
 }
 
 /** "Apply" on a suggested edit: change the caption, which makes results stale. */
 function applyEdit(edit: SuggestedEdit) {
-  if (!edit.original) return;
-  const text = captionInput.value;
-  const start = text.toLowerCase().indexOf(edit.original.toLowerCase());
-  if (start === -1) {
-    setMessage("That text is no longer in your caption.", "error");
+  // Checked again here (not just when drawing the button): the caption may
+  // have changed since, and an incomplete edit must never delete text.
+  const result = applyEditToText(captionInput.value, edit);
+  if (!result.ok) {
+    setMessage(result.reason, "error");
     return;
   }
-  const replacement = edit.action === "remove" ? "" : (edit.replacement ?? "");
-  captionInput.value = (text.slice(0, start) + replacement + text.slice(start + edit.original.length))
-    .replace(/ {2,}/g, " ")
-    .trim();
+  captionInput.value = result.text;
   captionInput.dispatchEvent(new Event("input"));
   setMessage("Change applied. Check again to see updated results.");
 }
 
+/**
+ * The pill in the corner. "Databricks connected" is shown ONLY after a real
+ * call succeeded; filled-in settings alone show "Databricks not tested yet".
+ */
 async function showBackendStatus() {
   const health = await checkHealth();
-  if (!health) {
-    statusPill.dataset.state = "offline";
-    statusPill.textContent = "Backend offline";
-    setMessage("Start the backend: open the backend folder and run `npm run dev`.", "error");
-  } else if (health.mode === "mock") {
-    statusPill.dataset.state = "mock";
-    statusPill.textContent = "Practice mode";
-  } else {
-    statusPill.dataset.state = "databricks";
-    statusPill.textContent = "Databricks connected";
-  }
+  const { state, label, title } = describeBackendStatus(health);
+  statusPill.dataset.state = state;
+  statusPill.textContent = label;
+  statusPill.title = title;
+  if (!health) setMessage("Start the backend: open the backend folder and run `npm run dev`.", "error");
 }
 
 captionInput.addEventListener("input", updateStaleness);
