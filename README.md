@@ -49,6 +49,7 @@ Real analysis goes through our Databricks App (`instagram-risk-analyzer`), which
    ANALYSIS_MODE=databricks
    DATABRICKS_HOST=https://instagram-risk-analyzer-7474656363418981.aws.databricksapps.com
    DATABRICKS_SERVING_ENDPOINT=gpt-oss-120b
+   DATABRICKS_INVOCATIONS_PATH=/api/v1/serving-endpoints/{endpoint}/invocations
    DATABRICKS_AUTH_TYPE=oauth-m2m
    DATABRICKS_WORKSPACE_HOST=https://dbc-d050c3b5-83dc.cloud.databricks.com
    DATABRICKS_CLIENT_ID=<client id>
@@ -58,7 +59,7 @@ Real analysis goes through our Databricks App (`instagram-risk-analyzer`), which
 3. Test the connection: `npm run check:databricks` (in `backend/`). It should print `Success. Connection verified.`
 4. Restart `npm run dev`. The popup shows **"Databricks not tested yet"** until the first call succeeds, then **"Databricks connected"**. If a call fails it shows **"Databricks error"** (hover for the reason). Filled-in settings alone are never shown as connected. A failed call is shown as an error, never replaced with practice results.
 
-**Status: unverified.** No live credentialed call has succeeded yet. The app currently redirects token calls outside `/api/` to a browser login, so it likely needs the `/api/` route requested in [docs/DATABRICKS_APP_API.md](docs/DATABRICKS_APP_API.md) (then set `DATABRICKS_INVOCATIONS_PATH`). A personal access token (`DATABRICKS_AUTH_TYPE=pat`) is also supported, but Databricks documents OAuth for calling apps. Results so far: [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
+**Status: live analysis verified (2026-11-14).** `npm run check:databricks` printed `Success. Connection verified.` with OAuth M2M (service principal `second-look-backend`) through the app's `/api/v1/...` route, and a synthetic caption analyzed through the backend returned two findings with verified quotes. The service principal needs **Workspace access** and **Can Use** on the app. History storage in Databricks is still unverified (the app has no history endpoints yet). A personal access token (`DATABRICKS_AUTH_TYPE=pat`) is also supported, but Databricks documents OAuth for calling apps. Details: [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
 
 If `check:databricks` fails: an OAuth token error means the workspace host, client ID or secret is wrong; an "auth" error from the app (401/403, or a redirect to the browser login) means the token isn't accepted for the app or the route isn't under `/api/`; 404 means the host, endpoint name or path is wrong.
 
