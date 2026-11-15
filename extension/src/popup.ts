@@ -1,7 +1,13 @@
 // Popup logic for milestone 1: type a caption (and optional photo text),
 // send it to the backend, show the findings, and mark them out of date
 // as soon as the draft changes.
-import type { AnalyzeResponse, SuggestedEdit, TextSource } from "../../shared/contract";
+import type {
+  AnalyzeResponse,
+  ExtensionMessage,
+  InstagramDraftReply,
+  SuggestedEdit,
+  TextSource,
+} from "../../shared/contract";
 import { analyzeDraft, checkHealth, describeBackendStatus, hashSources } from "./api";
 import { applyEditToText } from "./edits";
 import { renderResults, type ResultElements } from "./render";
@@ -22,6 +28,7 @@ const imageTextInput = byId<HTMLTextAreaElement>("image-text");
 const analyzeButton = byId<HTMLButtonElement>("analyze");
 const reanalyzeButton = byId<HTMLButtonElement>("reanalyze");
 const sampleButton = byId<HTMLButtonElement>("load-sample");
+const instagramButton = byId<HTMLButtonElement>("load-instagram");
 const message = byId<HTMLParagraphElement>("message");
 const statusPill = byId<HTMLSpanElement>("backend-status");
 const staleBanner = byId<HTMLDivElement>("stale-banner");
@@ -124,6 +131,36 @@ async function showBackendStatus() {
   if (!health) setMessage("Start the backend: open the backend folder and run `npm run dev`.", "error");
 }
 
+/**
+ * "Use Instagram draft": copy the caption (and photo text) from the Instagram
+ * post being written in the current tab into the boxes above. This is the
+ * manual fallback if the check on Instagram's page doesn't appear.
+ * It only reads text; it never changes or shares the Instagram post.
+ */
+async function loadInstagramDraft() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const notFound = "Open the caption step of a new Instagram post in this tab first.";
+  if (tab?.id === undefined) {
+    setMessage(notFound, "error");
+    return;
+  }
+  let reply: InstagramDraftReply | undefined;
+  try {
+    const request: ExtensionMessage = { kind: "get-instagram-draft" };
+    reply = await chrome.tabs.sendMessage(tab.id, request);
+  } catch {
+    reply = undefined; // not an Instagram tab, or the page was open before the extension loaded
+  }
+  if (!reply?.found) {
+    setMessage(notFound + " (If it is open, refresh the Instagram page.)", "error");
+    return;
+  }
+  captionInput.value = reply.caption;
+  imageTextInput.value = reply.imageText;
+  captionInput.dispatchEvent(new Event("input"));
+  setMessage("Copied your Instagram draft. Changes here don't change the post on Instagram.");
+}
+
 captionInput.addEventListener("input", updateStaleness);
 imageTextInput.addEventListener("input", updateStaleness);
 analyzeButton.addEventListener("click", analyze);
@@ -134,5 +171,6 @@ sampleButton.addEventListener("click", () => {
   captionInput.dispatchEvent(new Event("input"));
   captionInput.focus();
 });
+instagramButton.addEventListener("click", loadInstagramDraft);
 
 showBackendStatus();
