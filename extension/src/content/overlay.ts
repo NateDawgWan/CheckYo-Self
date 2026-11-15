@@ -78,8 +78,6 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const title = el("h1", undefined, "Second Look");
   head.append(title, button("Close", "secondary small close", () => actions.onBack()));
   const intro = el("p", "intro");
-  const unsupportedNote = el("p", "banner banner-incomplete");
-  unsupportedNote.hidden = true;
 
   const imageLabel = el("label", undefined, "Text in the photo");
   imageLabel.htmlFor = "sl-image-text";
@@ -120,7 +118,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
 
   const resultEls: ResultElements = { root: results, summary, markedDraft, findings, meta, mockBanner, incompleteBanner };
 
-  panel.append(head, intro, unsupportedNote, imageLabel, imageHint, imageText, buttonRow, shareReady, message, results);
+  panel.append(head, intro, imageLabel, imageHint, imageText, buttonRow, shareReady, message, results);
   shadow.append(style, launcher, panel);
   document.documentElement.append(host);
 
@@ -182,10 +180,6 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
     },
     setShareReady(ready) {
       shareReady.hidden = !ready;
-    },
-    setUnsupported(note) {
-      unsupportedNote.hidden = note === null;
-      unsupportedNote.textContent = note ?? "";
     },
     destroy() {
       host.remove();

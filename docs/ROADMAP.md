@@ -37,19 +37,26 @@ Supported workflow: **one single-photo post made in the "Create" dialog on deskt
 - Any change to the caption, the photo text, or the selected photo makes results stale. Replies for older requests or changed drafts are ignored. "Apply" only runs if the caption still matches the checked text.
 - Only a share Instagram *confirms* counts as published and is passed to history (currently a stand-in that stores nothing). Closed-without-confirmation is "unknown", never "published".
 - OCR uses a stand-in until milestone 2 lands; the user can type the photo's text in the panel.
-- If interception can't be relied on (other languages, a changed page), use the "Check this post" button, or the popup's **Use Instagram draft** button, which copies the caption into the popup.
+- **Only single-photo posts on an English page get any help.** For multi-photo, video or unrecognised posts, and for pages in other languages, the extension does nothing at all: no button, Share is never paused. The manual popup still works for any text.
+- If interception stops working (for example after Instagram changes its page), use the "Check this post" button, or the popup's **Use Instagram draft** button, which copies the caption into the popup.
+
+### Adding more later (no rewrite needed)
+
+- **Another post type** (carousel, video): check how it looks with the test kit, make `classifyPostType()` in `instagram-adapter.ts` recognise it, add it to `SUPPORTED_POST_TYPES` in `content/main.ts`, and give each extra photo its own `image_text:<n>` source.
+- **Another language**: record its Share button and success/failure texts with the test kit, then add one entry to `TEXT_BY_LANGUAGE` in `instagram-adapter.ts` and a test.
+- **Test kit:** `extension/dev/instagram-test-kit.js` is pasted into Chrome's Console on instagram.com. It adds Inspect / Record / Copy report buttons that read (never click) the page. Use it to re-check selectors after Instagram changes.
 
 ## Instagram's posting workflow: what has been checked
 
 Checked by hand on the live site on 2026-11-14 (desktop Chrome, English, new test account, mock backend). Expect Instagram to change its UI without notice; re-check after any breakage. Selectors are marked VERIFIED/UNVERIFIED in `extension/src/content/instagram-adapter.ts`.
 
 1. **Verified.** "Create" → "Select from computer" → Next (crop) → Next (edit) → caption step with a "Share" header button, inside `[role="dialog"]` labelled "Create new post".
-2. **Verified (English only).** The caption box is a Lexical editor: `contenteditable`, `role="textbox"`, `aria-label="Add a caption..."`. Share is a `div[role="button"]` with the text "Share". Other languages are not detected.
+2. **Verified (English only).** The caption box is a Lexical editor: `contenteditable`, `role="textbox"`, `aria-label="Add a caption..."`. Share is a `div[role="button"]` with the text "Share". The page's language comes from `<html lang="en">` (checked in Instagram's page source); other languages switch the extension off.
 3. **Verified.** The caption text can be read, and changes are seen (the stale banner appeared after typing). Writing to it works only by selecting all, **waiting** for Lexical to notice the selection, then `execCommand("insertText")`; writing immediately was undone by Lexical.
 4. **Partly verified.** At the caption step the photo is an `<img src="blob:…">` (713×713, alt "Photo for tag placement"). Reading it as a Blob for OCR, and whether it reflects crops/filters, has **not** been tested (OCR isn't built yet).
 5. **Blocking verified; letting through not tested.** A click on Share was stopped (nothing posted) and our panel opened. Letting the user's next Share click through after "Continue" has **not** been tested, because it would publish a post. Our panel works on top of Instagram's dialog (typing in it didn't close the composer).
 6. **Unverified.** The confirmation text ("Your post has been shared") and failure texts are guesses; checking them requires publishing. Until verified, a real post may be reported as "unknown".
 7. **Unverified.** The new post's ID is not read; `postId` is sent as `null`.
-8. **Unverified.** Carousel and video detection (more than one large photo, or a `<video>`) is a guess. For those posts the extension doesn't intercept Share; the manual button checks the caption only.
+8. **Unverified.** Carousel and video detection (more than one large photo, slide arrows, or a `<video>`) is a guess. If it misses a carousel, the extension treats it as a single photo (it checks the caption and the first photo's text); it never blocks a post without offering "continue".
 9. Instagram's "Download your information" export format: not checked (milestone 3).
 10. Instagram's terms for a personal, user-initiated tool: not reviewed. Read them before demoing; never scrape other accounts.

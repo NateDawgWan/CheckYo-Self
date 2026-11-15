@@ -61,6 +61,7 @@ extension/src/content/main.ts           Instagram content script: wires everythi
 extension/src/content/instagram-adapter.ts  ALL Instagram page details (selectors, caption writing)
 extension/src/content/share-flow.ts     Stale/outdated/Share-permission rules (no DOM; tested)
 extension/src/content/overlay.ts        Warning panel on instagram.com (Shadow DOM, reuses render.ts)
+extension/dev/instagram-test-kit.js     Paste into Chrome's Console to inspect/record Instagram's page (dev only)
 backend/test/, extension/test/  Regression tests (node:test, run with `npm test`)
 docs/ROADMAP.md               Next milestones, history storage plan, Instagram assumptions
 docs/TEAM.md                  Module owners and integration interfaces (in code vs. proposed)
@@ -102,7 +103,7 @@ curl http://127.0.0.1:8787/api/health     # shows mode and databricks.state
 - `shared/package.json` sets `"type": "module"`; keep it, or the backend can't import the contract.
 - Run both `typecheck` and both `npm test` commands, and the extension build, before committing.
 - When you fix a bug, add a test for it in `backend/test/` or `extension/test/`.
-- Instagram page details (selectors, button text, how to write the caption) belong ONLY in `extension/src/content/instagram-adapter.ts`.
+- Instagram page details (selectors, button text, how to write the caption) belong ONLY in `extension/src/content/instagram-adapter.ts`. Button/message text goes in its per-language table `TEXT_BY_LANGUAGE`; supported post types are listed in `SUPPORTED_POST_TYPES` (`content/main.ts`).
 - The extension must never click Share or publish on its own. "Continue" may only let the user's own next click through.
 - After reloading the extension in `chrome://extensions`, refresh the Instagram tab: the old content script stops working.
 

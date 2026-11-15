@@ -3,22 +3,71 @@
 //
 // IMPORTANT: Instagram's class names are generated and change often, so we
 // only use roles, aria-labels, contenteditable and visible button text.
-// Button text is English-only for now (see LABELS); other languages will
-// simply not be detected, and the manual "Check this post" panel still works
-// from the popup.
 //
-// Every selector below is a best guess until it is checked on the live site.
-// Each one is marked VERIFIED or UNVERIFIED; see docs/ROADMAP.md.
+// Every selector below is marked VERIFIED (checked on the live site, with
+// the date) or UNVERIFIED; see docs/ROADMAP.md. To re-check them, use the
+// test kit in extension/dev/instagram-test-kit.js.
 
-/** Visible English text we look for. Lower-case; compared after trimming. */
-export const LABELS = {
-  // UNVERIFIED: the header button on the last step of "Create new post".
-  share: ["share"],
-  // UNVERIFIED: text Instagram shows after a successful share.
-  published: ["your post has been shared", "post shared"],
-  // UNVERIFIED: text Instagram shows when a share fails.
-  failed: ["couldn't be shared", "could not be shared", "couldn't share", "something went wrong", "try again"],
+// ---------------------------------------------------------------------------
+// Languages
+// ---------------------------------------------------------------------------
+
+/** Visible text we look for, in one language. Lower-case; compared after trimming. */
+export interface InstagramText {
+  share: string[];     // the Share button on the caption step
+  published: string[]; // text shown after a successful share
+  failed: string[];    // text shown when a share fails
+}
+
+/**
+ * One entry per supported Instagram language, keyed by the page's language
+ * code (<html lang="...">). TO ADD A LANGUAGE: record its texts with the test
+ * kit, add an entry here, and add a test in test/instagram-adapter.test.ts.
+ * On a page in any other language, the extension stays out of the way.
+ */
+export const TEXT_BY_LANGUAGE: Record<string, InstagramText> = {
+  en: {
+    share: ["share"], // VERIFIED 2026-11-14
+    published: ["your post has been shared", "post shared"], // UNVERIFIED
+    failed: ["couldn't be shared", "could not be shared", "couldn't share", "something went wrong", "try again"], // UNVERIFIED
+  },
 };
+
+/** The texts for a page language like "en" or "en-US", or null if unsupported. */
+export function textForLanguage(lang: string | null | undefined): InstagramText | null {
+  const code = (lang ?? "").trim().toLowerCase().split("-")[0];
+  return TEXT_BY_LANGUAGE[code] ?? null;
+}
+
+/** The texts for the current Instagram page, or null if its language isn't supported. */
+function pageText(doc: Document): InstagramText | null {
+  return textForLanguage(doc.documentElement.lang);
+}
+
+// ---------------------------------------------------------------------------
+// Post types
+// ---------------------------------------------------------------------------
+
+/**
+ * What kind of post is being made. Only the types in SUPPORTED_POST_TYPES
+ * (content/main.ts) get any help from the extension. TO SUPPORT A NEW TYPE:
+ * make sure it is detected correctly here, then add it to that list and
+ * handle its photos/text in main.ts.
+ */
+export type PostType = "single-photo" | "multi-photo" | "video" | "unknown";
+
+export interface PostTypeClues {
+  photoCount: number;     // large photos in the dialog
+  hasVideo: boolean;
+  carouselHints: number;  // slide arrows / dots near the photo
+}
+
+export function classifyPostType(clues: PostTypeClues): PostType {
+  if (clues.hasVideo) return "video";
+  if (clues.photoCount > 1 || clues.carouselHints > 0) return "multi-photo";
+  if (clues.photoCount === 1) return "single-photo";
+  return "unknown"; // no photo found: don't guess
+}
 
 const SELECTORS = {
   // UNVERIFIED: Instagram's modal dialogs use role="dialog".
@@ -33,6 +82,8 @@ const SELECTORS = {
   previewImage: 'img[src^="blob:"]',
   previewCanvas: "canvas",
   video: "video",
+  // UNVERIFIED: arrows/dots shown next to the photo when several are selected.
+  carouselHint: '[aria-label="Go back"], [aria-label="Next"], [aria-label*="slide" i]',
 };
 
 /** Images smaller than this (in CSS pixels) are icons or avatars, not the post. */
@@ -47,16 +98,16 @@ export function normalizeCaption(text: string): string {
   return text.replace(/ /g, " ").replace(/\r\n?/g, "\n").replace(/\n+$/g, "").trim();
 }
 
-/** Is this the text of a Share button? */
-export function isShareLabel(text: string | null | undefined): boolean {
-  return LABELS.share.includes((text ?? "").trim().toLowerCase());
+/** Is this the text of a Share button (in the given language)? */
+export function isShareLabel(text: string | null | undefined, words: InstagramText): boolean {
+  return words.share.includes((text ?? "").trim().toLowerCase());
 }
 
 /** Does this dialog text show a confirmed publication, a failure, or neither? */
-export function classifyOutcomeText(text: string): "published" | "failed" | null {
+export function classifyOutcomeText(text: string, words: InstagramText): "published" | "failed" | null {
   const lower = text.toLowerCase();
-  if (LABELS.published.some((t) => lower.includes(t))) return "published";
-  if (LABELS.failed.some((t) => lower.includes(t))) return "failed";
+  if (words.published.some((t) => lower.includes(t))) return "published";
+  if (words.failed.some((t) => lower.includes(t))) return "failed";
   return null;
 }
 
@@ -81,13 +132,13 @@ export interface ComposerSnapshot {
   editor: HTMLElement | null;
   shareButton: HTMLElement | null;
   caption: string;
-  image: PreviewImage | null;
-  /** Why this post type is not supported (carousel, video), or null. */
-  unsupported: string | null;
+  /** The selected photos, in order (one for a single-photo post). */
+  images: PreviewImage[];
+  postType: PostType;
 }
 
 const NO_COMPOSER: ComposerSnapshot = {
-  step: "none", dialog: null, editor: null, shareButton: null, caption: "", image: null, unsupported: null,
+  step: "none", dialog: null, editor: null, shareButton: null, caption: "", images: [], postType: "unknown",
 };
 
 function isVisible(node: Element): boolean {
@@ -96,9 +147,9 @@ function isVisible(node: Element): boolean {
 }
 
 /** The Share button inside a dialog, or null. */
-function findShareButton(dialog: Element): HTMLElement | null {
+function findShareButton(dialog: Element, words: InstagramText): HTMLElement | null {
   for (const button of dialog.querySelectorAll<HTMLElement>(SELECTORS.button)) {
-    if (isShareLabel(button.textContent) && isVisible(button)) return button;
+    if (isShareLabel(button.textContent, words) && isVisible(button)) return button;
   }
   return null;
 }
@@ -125,17 +176,21 @@ function findPreviewImages(dialog: Element): PreviewImage[] {
 
 /** Looks at the page and describes the post composer, if one is open. */
 export function readComposer(doc: Document): ComposerSnapshot {
+  const words = pageText(doc);
+  if (!words) return NO_COMPOSER; // Instagram is in a language we don't support yet
+
   // There can be several dialogs (for example a "Discard post?" prompt on top).
   for (const dialog of doc.querySelectorAll<HTMLElement>(SELECTORS.dialog)) {
     const editor = dialog.querySelector<HTMLElement>(SELECTORS.captionEditor);
-    const shareButton = findShareButton(dialog);
+    const shareButton = findShareButton(dialog, words);
     if (!editor || !shareButton) continue;
 
     const images = findPreviewImages(dialog);
-    let unsupported: string | null = null;
-    if (dialog.querySelector(SELECTORS.video)) unsupported = "Video posts aren't supported yet.";
-    // UNVERIFIED: a carousel shows more than one large photo in the dialog.
-    else if (images.length > 1) unsupported = "Posts with several photos aren't supported yet.";
+    const postType = classifyPostType({
+      photoCount: images.length,
+      hasVideo: dialog.querySelector(SELECTORS.video) !== null,
+      carouselHints: dialog.querySelectorAll(SELECTORS.carouselHint).length,
+    });
 
     return {
       step: "caption-step",
@@ -143,8 +198,8 @@ export function readComposer(doc: Document): ComposerSnapshot {
       editor,
       shareButton,
       caption: normalizeCaption(editor.innerText ?? editor.textContent ?? ""),
-      image: images[0] ?? null,
-      unsupported,
+      images,
+      postType,
     };
   }
   // A dialog with a Share-less "Next" button, etc. We only care that a
@@ -160,8 +215,10 @@ export function readComposer(doc: Document): ComposerSnapshot {
 export function shareButtonFromEvent(event: Event): HTMLElement | null {
   const target = event.target;
   if (!(target instanceof Element)) return null;
+  const words = pageText(target.ownerDocument);
+  if (!words) return null;
   const button = target.closest<HTMLElement>(SELECTORS.button);
-  if (!button || !isShareLabel(button.textContent)) return null;
+  if (!button || !isShareLabel(button.textContent, words)) return null;
   const dialog = button.closest(SELECTORS.dialog);
   // Only the composer's Share button: the dialog must also have a caption box.
   if (!dialog || !dialog.querySelector(SELECTORS.captionEditor)) return null;
@@ -273,12 +330,14 @@ export async function writeCaption(editor: HTMLElement, text: string): Promise<b
  *  - null:        still waiting.
  */
 export function detectPublishOutcome(doc: Document): "published" | "failed" | "closed" | null {
+  const words = pageText(doc);
   const dialogs = [...doc.querySelectorAll<HTMLElement>(SELECTORS.dialog)];
   for (const dialog of dialogs) {
+    if (!words) break; // can't read the page's language: report "closed"/null only
     // Skip a dialog that still shows the caption box: its text includes the
     // user's own caption, which could contain words like "post shared".
     if (dialog.querySelector(SELECTORS.captionEditor)) continue;
-    const outcome = classifyOutcomeText(dialog.innerText ?? dialog.textContent ?? "");
+    const outcome = classifyOutcomeText(dialog.innerText ?? dialog.textContent ?? "", words);
     if (outcome) return outcome;
   }
   return dialogs.length === 0 ? "closed" : null;

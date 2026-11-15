@@ -61,8 +61,6 @@ export interface WarningPanel {
   setStale(stale: boolean): void;
   /** Show or hide the "Now click Share to post" hint. */
   setShareReady(ready: boolean): void;
-  /** Note shown in the panel when the post type isn't supported (carousel, video). */
-  setUnsupported(note: string | null): void;
   destroy(): void;
 }
 

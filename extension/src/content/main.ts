@@ -28,9 +28,24 @@ import {
   shareButtonFromEvent,
   writeCaption,
   type ComposerSnapshot,
+  type PostType,
 } from "./instagram-adapter";
 import { createOverlayPanel } from "./overlay";
 import { ShareFlow, draftKey, type PublishOutcome } from "./share-flow";
+
+/**
+ * The kinds of post the extension helps with. For anything else (several
+ * photos, video, or a post we can't recognise) the extension does nothing at
+ * all: no button, and Share is never paused.
+ * TO SUPPORT ANOTHER TYPE: add it here, then give each of its photos a
+ * "Text in the photo" source in currentSources() (image_text:1, :2, ...).
+ */
+export const SUPPORTED_POST_TYPES: PostType[] = ["single-photo"];
+
+/** Is the caption step of a supported post open right now? */
+function isSupportedCaptionStep(snapshot: ComposerSnapshot): boolean {
+  return snapshot.step === "caption-step" && SUPPORTED_POST_TYPES.includes(snapshot.postType);
+}
 
 export interface IntegrationOptions {
   ocr: OcrPort;
@@ -43,8 +58,8 @@ export function startInstagramIntegration(options: IntegrationOptions) {
 
   // What we last read from the page.
   let snapshot: ComposerSnapshot = readComposer(document);
-  let imageKey: string | null = null;
-  let imageText = "";   // from OCR, or typed by the user in our panel
+  let imageKey: string | null = null; // which photo(s) are selected; a change means a different post
+  let imageText = "";   // text in the (single) photo: from OCR, or typed by the user in our panel
   let ocrTurn = 0;      // to ignore OCR results for a photo that is no longer selected
   let sharedDraftHash: Promise<string> | null = null; // hash of the draft that was shared
 
@@ -74,7 +89,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
 
     if (flow.isPublishing()) watchPublishOutcome();
 
-    if (snapshot.step !== "caption-step") {
+    if (!isSupportedCaptionStep(snapshot)) {
       if (panel) {
         panel.showLauncher(false);
         panel.close();
@@ -94,10 +109,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
 
     const p = getPanel();
     if (!p.isOpen()) p.showLauncher(true);
-    p.setUnsupported(snapshot.unsupported);
 
     // A different photo: forget the old photo text and read the new one.
-    const newImageKey = snapshot.image?.key ?? "no-image";
+    const newImageKey = snapshot.images.map((image) => image.key).join("|");
     if (newImageKey !== imageKey) {
       imageKey = newImageKey;
       imageText = "";
@@ -127,7 +141,8 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   async function startOcr() {
     const myTurn = ++ocrTurn;
     const p = getPanel();
-    if (snapshot.unsupported || !snapshot.image) {
+    const photo = snapshot.images[0]; // single-photo posts only (see SUPPORTED_POST_TYPES)
+    if (!photo) {
       p.setImageText("", "Type any text you can see in the photo (signs, name tags, jerseys).");
       return;
     }
@@ -136,7 +151,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       return;
     }
     p.setImageText("", "Reading text from the photo on your computer…");
-    const blob = await readImageBlob(snapshot.image);
+    const blob = await readImageBlob(photo);
     if (myTurn !== ocrTurn) return; // a newer photo was selected meanwhile
     if (!blob) {
       p.setImageText("", "Couldn't read this photo here. Type any text you can see in it.");
@@ -169,7 +184,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       const p = getPanel();
       p.setShareReady(false);
       p.close();
-      p.showLauncher(snapshot.step === "caption-step");
+      p.showLauncher(isSupportedCaptionStep(snapshot));
       snapshot.editor?.focus();
     },
     onContinue() {
@@ -191,8 +206,8 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   async function checkDraft() {
     snapshot = readComposer(document);
     const p = getPanel();
-    if (snapshot.step !== "caption-step") {
-      p.setMessage("Open Instagram's caption step first.", "error");
+    if (!isSupportedCaptionStep(snapshot)) {
+      p.setMessage("Open the caption step of a single-photo post first.", "error");
       return;
     }
     draftChanged();
@@ -242,7 +257,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     if (applying) return;
     const p = getPanel();
     snapshot = readComposer(document); // read the caption as it is RIGHT NOW
-    if (snapshot.step !== "caption-step" || !snapshot.editor) {
+    if (!isSupportedCaptionStep(snapshot) || !snapshot.editor) {
       p.setMessage("The caption box isn't open any more.", "error");
       return;
     }
@@ -265,24 +280,21 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     } finally {
       applying = false;
     }
+    scan(); // the caption (may have) changed, so the result is now stale
     if (changed) {
-      scan(); // the caption changed, so the result is now stale
       p.setMessage("Change applied. Check again to see updated results.");
       return;
-    } else {
-      // Instagram's editor didn't take the change. Never leave a half-edit
-      // silently: tell the user, and offer the text to paste themselves.
-      const copied = await navigator.clipboard.writeText(result.text).then(() => true, () => false);
-      const copyNote = copied ? " The suggested caption was copied; paste it in yourself." : "";
-      const nowText = readComposer(document).caption;
-      p.setMessage(
-        nowText === captionBefore
-          ? "Couldn't change Instagram's caption box." + copyNote
-          : "Couldn't apply this change cleanly, and your caption may have changed. Please check it." + copyNote,
-        "error",
-      );
     }
-    scan(); // the caption changed, so the result is now stale
+    // Instagram's editor didn't take the change. Never leave a half-edit
+    // silently: tell the user, and offer the text to paste themselves.
+    const copied = await navigator.clipboard.writeText(result.text).then(() => true, () => false);
+    const copyNote = copied ? " The suggested caption was copied; paste it in yourself." : "";
+    p.setMessage(
+      snapshot.caption === captionBefore
+        ? "Couldn't change Instagram's caption box." + copyNote
+        : "Couldn't apply this change cleanly, and your caption may have changed. Please check it." + copyNote,
+      "error",
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -297,8 +309,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   function onPointerOrClick(event: Event) {
     const shareButton = shareButtonFromEvent(event);
     if (!shareButton) return;
-    // Only single-photo posts are handled; for others we don't get in the way.
-    if (readComposer(document).unsupported) return;
+    // Only supported post types (see SUPPORTED_POST_TYPES); for others we
+    // never get in the way.
+    if (!isSupportedCaptionStep(readComposer(document))) return;
 
     const now = Date.now();
     if (event.type !== "click") {
@@ -335,7 +348,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   /** Enter/Space on a focused Share button. */
   function onKeyDown(event: KeyboardEvent) {
     if (event.key !== "Enter" && event.key !== " ") return;
-    if (!shareButtonFromEvent(event) || readComposer(document).unsupported) return;
+    if (!shareButtonFromEvent(event) || !isSupportedCaptionStep(readComposer(document))) return;
     if (flow.isShareAllowed(Date.now())) return; // let it through; the click that follows decides
     stop(event);
     scan();
@@ -390,11 +403,12 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     if (sender.id !== chrome.runtime.id || sender.tab) return false;
     if ((message as ExtensionMessage | null)?.kind !== "get-instagram-draft") return false;
     snapshot = readComposer(document);
+    const found = isSupportedCaptionStep(snapshot);
     const reply: InstagramDraftReply = {
       kind: "instagram-draft",
-      found: snapshot.step === "caption-step",
-      caption: snapshot.step === "caption-step" ? snapshot.caption : "",
-      imageText: snapshot.step === "caption-step" ? imageText : "",
+      found,
+      caption: found ? snapshot.caption : "",
+      imageText: found ? imageText : "",
     };
     sendResponse(reply);
     return false;

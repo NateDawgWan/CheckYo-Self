@@ -1,26 +1,67 @@
 // Tests for the page-independent parts of src/content/instagram-adapter.ts.
-// (The parts that read Instagram's page are checked by hand on the live site;
-// see docs/ROADMAP.md.)
+// (The parts that read Instagram's page are checked by hand on the live site
+// with extension/dev/instagram-test-kit.js; see docs/ROADMAP.md.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyOutcomeText, isShareLabel, normalizeCaption } from "../src/content/instagram-adapter";
+import {
+  classifyOutcomeText,
+  classifyPostType,
+  isShareLabel,
+  normalizeCaption,
+  textForLanguage,
+} from "../src/content/instagram-adapter";
+
+const english = textForLanguage("en")!;
 
 test("caption text is normalized the way the user sees it", () => {
   assert.equal(normalizeCaption("  hi there\r\nline 2\n\n"), "hi there\nline 2");
   assert.equal(normalizeCaption("\n"), "");
 });
 
+// --- languages ------------------------------------------------------------------
+
+test("English pages are supported, with or without a region code", () => {
+  assert.notEqual(textForLanguage("en"), null);
+  assert.notEqual(textForLanguage("en-US"), null);
+  assert.notEqual(textForLanguage(" EN-gb "), null);
+});
+
+test("other or missing languages are not supported, so the extension stays out of the way", () => {
+  assert.equal(textForLanguage("es"), null);
+  assert.equal(textForLanguage(""), null);
+  assert.equal(textForLanguage(null), null);
+});
+
 test("only the exact word Share counts as the Share button", () => {
-  assert.equal(isShareLabel(" Share "), true);
-  assert.equal(isShareLabel("share"), true);
-  assert.equal(isShareLabel("Share to Facebook"), false);
-  assert.equal(isShareLabel("Next"), false);
-  assert.equal(isShareLabel(null), false);
+  assert.equal(isShareLabel(" Share ", english), true);
+  assert.equal(isShareLabel("share", english), true);
+  assert.equal(isShareLabel("Share to Facebook", english), false);
+  assert.equal(isShareLabel("Next", english), false);
+  assert.equal(isShareLabel(null, english), false);
 });
 
 test("confirmation, failure and neither are told apart", () => {
-  assert.equal(classifyOutcomeText("Post shared\nYour post has been shared."), "published");
-  assert.equal(classifyOutcomeText("Your post couldn't be shared. Try again."), "failed");
-  assert.equal(classifyOutcomeText("Sharing"), null);
-  assert.equal(classifyOutcomeText("Create new post"), null);
+  assert.equal(classifyOutcomeText("Post shared\nYour post has been shared.", english), "published");
+  assert.equal(classifyOutcomeText("Your post couldn't be shared. Try again.", english), "failed");
+  assert.equal(classifyOutcomeText("Sharing", english), null);
+  assert.equal(classifyOutcomeText("Create new post", english), null);
+});
+
+// --- post types -----------------------------------------------------------------
+
+test("one photo and nothing else is a single-photo post", () => {
+  assert.equal(classifyPostType({ photoCount: 1, hasVideo: false, carouselHints: 0 }), "single-photo");
+});
+
+test("several photos, or carousel arrows, make a multi-photo post", () => {
+  assert.equal(classifyPostType({ photoCount: 2, hasVideo: false, carouselHints: 0 }), "multi-photo");
+  assert.equal(classifyPostType({ photoCount: 1, hasVideo: false, carouselHints: 1 }), "multi-photo");
+});
+
+test("any video makes it a video post", () => {
+  assert.equal(classifyPostType({ photoCount: 1, hasVideo: true, carouselHints: 0 }), "video");
+});
+
+test("no photo found is 'unknown', never guessed as single-photo", () => {
+  assert.equal(classifyPostType({ photoCount: 0, hasVideo: false, carouselHints: 0 }), "unknown");
 });
