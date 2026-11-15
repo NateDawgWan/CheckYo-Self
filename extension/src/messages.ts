@@ -97,6 +97,9 @@ export function parseExtensionMessage(raw: unknown): Parsed<ExtensionMessage> {
     case "get-instagram-draft":
       return { ok: true, value: { kind: "get-instagram-draft" } };
 
+    case "get-backend-status":
+      return { ok: true, value: { kind: "get-backend-status" } };
+
     default:
       return { ok: false, reason: "Unknown message kind." };
   }

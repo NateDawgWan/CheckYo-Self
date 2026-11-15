@@ -21,7 +21,10 @@ function response(draftHash = HASH): AnalyzeResponse {
 }
 
 /** A fake backend and history that record what they were given. */
-function fakes(answer: () => Promise<AnalyzeResponse> = async () => response()) {
+type Status = Awaited<ReturnType<WorkerDeps["backendStatus"]>>;
+const CONNECTED: Status = { state: "databricks-verified", label: "Databricks connected", title: "Last successful call: now." };
+
+function fakes(answer: () => Promise<AnalyzeResponse> = async () => response(), status: () => Promise<Status> = async () => CONNECTED) {
   const analyzed: TextSource[][] = [];
   const recorded: PublishedPostInfo[] = [];
   const history: HistoryClient = { async recordPublished(info) { recorded.push(info); } };
@@ -29,6 +32,7 @@ function fakes(answer: () => Promise<AnalyzeResponse> = async () => response()) 
     extensionId: OUR_ID,
     analyze: async (sources) => { analyzed.push(sources); return answer(); },
     history,
+    backendStatus: status,
   };
   return { deps, analyzed, recorded };
 }
@@ -118,4 +122,28 @@ test("a confirmed publication is passed to history; nothing else is", async () =
 test("the popup's request for the Instagram draft is not answered by the worker", async () => {
   const { deps } = fakes();
   assert.equal(await handleWorkerMessage({ kind: "get-instagram-draft" }, POPUP, deps), undefined);
+});
+
+// --- status pill on the Instagram panel ------------------------------------------
+
+test("the Instagram panel gets the same backend status as the popup's pill", async () => {
+  const { deps, analyzed } = fakes();
+  const reply = await handleWorkerMessage({ kind: "get-backend-status" }, INSTAGRAM_TAB, deps);
+  assert.deepEqual(reply, { kind: "backend-status", ...CONNECTED });
+  assert.equal(analyzed.length, 0, "asking for the status never analyzes anything");
+});
+
+test("if the backend can't be asked, the panel shows it as offline instead of failing", async () => {
+  const { deps } = fakes(undefined, async () => { throw new Error("network down"); });
+  const reply = await handleWorkerMessage({ kind: "get-backend-status" }, INSTAGRAM_TAB, deps);
+  assert.equal((reply as { state?: string }).state, "offline");
+  assert.equal((reply as { kind?: string }).kind, "backend-status");
+});
+
+test("status is only reported to our content script on instagram.com", async () => {
+  const { deps } = fakes();
+  const fromOtherSite = await handleWorkerMessage({ kind: "get-backend-status" }, { id: OUR_ID, url: "https://example.com/", tab: {} }, deps);
+  assert.equal((fromOtherSite as { kind?: string }).kind, "rejected");
+  const fromOtherExtension = await handleWorkerMessage({ kind: "get-backend-status" }, { ...INSTAGRAM_TAB, id: "someone-else" }, deps);
+  assert.equal((fromOtherExtension as { kind?: string }).kind, "rejected");
 });

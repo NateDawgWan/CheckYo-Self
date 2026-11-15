@@ -9,7 +9,7 @@
 //
 // To plug in a real module, pass it to startInstagramIntegration() in
 // content/main.ts (OCR, panel) or to the worker in background.ts (history).
-import type { AnalyzeResponse, SuggestedEdit, TextSource } from "../../shared/contract";
+import type { BackendStatusReply, AnalyzeResponse, SuggestedEdit, TextSource } from "../../shared/contract";
 import type { OcrResult } from "./ocr";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +75,8 @@ export interface WarningPanel {
    * words unclear, or the text was cut to the size limit. [] clears them.
    */
   setPhotoNotices(notices: PhotoNotice[]): void;
+  /** The Databricks/backend status pill in the panel's header (same states as the popup's pill). */
+  setBackendStatus(status: Omit<BackendStatusReply, "kind">): void;
   setBusy(busy: boolean): void;
   setMessage(text: string, kind?: MessageKind): void;
   showResult(result: AnalyzeResponse, sources: TextSource[]): void;
