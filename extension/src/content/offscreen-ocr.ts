@@ -40,7 +40,7 @@ export const offscreenOcr: OcrPort = {
     try {
       reply = await chrome.runtime.sendMessage(request);
     } catch {
-      throw new OcrError("ENGINE_LOAD_FAILED", "Second Look was reloaded. Refresh this page to read the photo.");
+      throw new OcrError("ENGINE_LOAD_FAILED", "CheckYo'Self was reloaded. Refresh this page to read the photo.");
     }
     if (!reply || reply.requestId !== requestId) {
       throw new OcrError("RECOGNITION_FAILED", "The photo reader didn't answer.");

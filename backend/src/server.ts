@@ -33,7 +33,7 @@ const app = createApp({
 
 // Listen on localhost only, so other machines on the hackathon Wi-Fi can't use it.
 app.listen(config.port, "127.0.0.1", () => {
-  console.log(`Second Look backend on http://127.0.0.1:${config.port}  (mode: ${config.mode}, history: ${historyStore.kind})`);
+  console.log(`CheckYo'Self backend on http://127.0.0.1:${config.port}  (mode: ${config.mode}, history: ${historyStore.kind})`);
   if (config.mode === "mock") {
     console.log("MOCK MODE: results are keyword rules, not AI. Set ANALYSIS_MODE=databricks in backend/.env for real analysis.");
   } else {

@@ -30,7 +30,7 @@ Add a "Delete my imported history" action before showing this to anyone else.
 
 Supported workflow: **one single-photo post made in the "Create" dialog on desktop instagram.com, with Instagram in English.** Code: `extension/src/content/` (adapter, share flow, panel), `extension/src/background.ts` (service worker).
 
-- At the caption step a **"Second Look: Check this post"** button is always shown (bottom-right). This manual path works even if Share interception stops working.
+- At the caption step a **"CheckYo'Self: Check this post"** button is always shown (bottom-right). This manual path works even if Share interception stops working.
 - Clicking **Share** is paused and a panel offers **Check this post**, **Back to editing**, or **Share without checking** / **Continue to Share**.
 - The extension **never clicks Share itself**. "Continue" only lets the user's *next* real click on Share through, once (it expires after 60 s, on any edit, on "Back", or when the composer closes). While a share is in progress, more Share clicks are blocked (no double post).
 - Backend calls go content script → service worker (`chrome.runtime.sendMessage`) → `api.ts` → local backend. Only text is sent; the worker re-checks this.

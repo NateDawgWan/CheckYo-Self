@@ -1,4 +1,4 @@
-// Second Look: Instagram test kit (a developer tool; NOT part of the extension).
+// CheckYo'Self: Instagram test kit (a developer tool; NOT part of the extension).
 //
 // Use it to check what Instagram's page really looks like, for example after
 // Instagram changes its design, before editing content/instagram-adapter.ts.
