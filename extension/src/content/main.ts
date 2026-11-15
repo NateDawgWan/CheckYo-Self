@@ -12,6 +12,7 @@
 // The rules (stale, outdated, one-time permission, no double share) are in
 // share-flow.ts, which is unit-tested.
 import type {
+  BackendStatusReply,
   CheckDraftReply,
   ExtensionMessage,
   InstagramDraftReply,
@@ -212,12 +213,37 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   // Panel actions
   // -------------------------------------------------------------------------
 
+  let statusTurn = 0; // so an older status answer can't overwrite a newer one
+
+  /**
+   * Updates the status pill in the panel's header. Asks the service worker,
+   * which asks the backend's /api/health: no Databricks call, nothing sent.
+   * Called when the panel opens and after every check.
+   */
+  async function refreshBackendStatus() {
+    const myTurn = ++statusTurn;
+    let reply: BackendStatusReply | { kind: "rejected"; reason: string } | undefined;
+    try {
+      const message: ExtensionMessage = { kind: "get-backend-status" };
+      reply = await chrome.runtime.sendMessage(message);
+    } catch {
+      reply = undefined; // the extension was reloaded; this page needs a refresh
+    }
+    if (myTurn !== statusTurn || !panel) return;
+    if (reply?.kind === "backend-status") {
+      panel.setBackendStatus({ state: reply.state, label: reply.label, title: reply.title });
+    } else {
+      panel.setBackendStatus({ state: "offline", label: "Status unknown", title: "CheckYo'Self was reloaded. Refresh this page." });
+    }
+  }
+
   const actions: WarningPanelActions = {
     onOpen() {
       // The corner button only OPENS the panel, so the user sees the photo
       // text before anything is sent. Sending needs a click on "Check this post".
       const p = getPanel();
       if (!p.isOpen()) p.open("manual");
+      void refreshBackendStatus();
     },
     onCheck() {
       const p = getPanel();
@@ -312,6 +338,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     }
     // An "outdated" reply is ignored on purpose: the draft changed while we waited.
     draftChanged();
+    void refreshBackendStatus(); // a real Databricks call just succeeded or failed
   }
 
   let applying = false; // so a double-click on Apply can't start two edits at once
@@ -405,6 +432,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     scan();
     const p = getPanel();
     p.open("share-clicked");
+    void refreshBackendStatus();
     p.setShareReady(false);
     p.setMessage(flow.hasCurrentResult() ? "You checked this exact post. Continue, or go back to edit." : "");
   }
@@ -417,6 +445,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
     stop(event);
     scan();
     getPanel().open("share-clicked");
+    void refreshBackendStatus();
   }
 
   function stop(event: Event) {

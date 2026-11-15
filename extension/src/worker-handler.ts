@@ -1,7 +1,7 @@
 // What the service worker does with each message. Kept apart from
 // background.ts (which only connects this to Chrome) so it can be tested in
 // Node with fake senders and a fake backend (see test/worker-handler.test.ts).
-import type { AnalyzeResponse, CheckDraftReply, TextSource } from "../../shared/contract";
+import type { AnalyzeResponse, BackendStatusReply, CheckDraftReply, TextSource } from "../../shared/contract";
 import { parseExtensionMessage } from "./messages";
 import type { HistoryClient } from "./ports";
 
@@ -16,6 +16,8 @@ export interface WorkerDeps {
   extensionId: string;
   analyze: (sources: TextSource[], draftHash: string) => Promise<AnalyzeResponse>;
   history: HistoryClient;
+  /** The status pill's text, from GET /api/health (never calls Databricks). */
+  backendStatus: () => Promise<Omit<BackendStatusReply, "kind">>;
 }
 
 const INSTAGRAM_PREFIX = "https://www.instagram.com/";
@@ -34,7 +36,7 @@ export async function handleWorkerMessage(
   raw: unknown,
   sender: SenderInfo,
   deps: WorkerDeps,
-): Promise<CheckDraftReply | { kind: "ok" } | { kind: "rejected"; reason: string } | undefined> {
+): Promise<CheckDraftReply | BackendStatusReply | { kind: "ok" } | { kind: "rejected"; reason: string } | undefined> {
   const parsed = parseExtensionMessage(raw);
   if (!parsed.ok) {
     // Only answer messages that came from our own extension.
@@ -76,6 +78,16 @@ export async function handleWorkerMessage(
       return { kind: "ok" };
     }
 
+    case "get-backend-status": {
+      if (!isOurInstagramContentScript(sender, deps)) {
+        return { kind: "rejected", reason: "Status is only reported to the Instagram page." };
+      }
+      try {
+        return { kind: "backend-status", ...(await deps.backendStatus()) };
+      } catch {
+        return { kind: "backend-status", state: "offline", label: "Backend offline", title: "Couldn't reach the CheckYo'Self backend." };
+      }
+    }
     case "get-instagram-draft":
       return undefined; // meant for the content script, not the worker
   }
