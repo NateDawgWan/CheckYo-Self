@@ -66,7 +66,8 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   // popup.css styles :root and body; inside a shadow root the equivalent is :host.
   style.textContent = popupCss.replaceAll(":root", ":host") + PANEL_CSS;
 
-  const launcher = button("Second Look: Check this post", "primary launcher", () => actions.onCheck());
+  // Opens the panel only. Nothing is sent until "Check this post" inside it.
+  const launcher = button("Second Look: Check this post", "primary launcher", () => actions.onOpen());
   launcher.hidden = true;
 
   const panel = el("section", "panel");
@@ -84,7 +85,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const imageHint = el("p", "hint");
   const imageText = el("textarea");
   imageText.id = "sl-image-text";
-  imageText.rows = 2;
+  imageText.rows = 4; // OCR text is often several lines
   imageText.placeholder = "e.g. a sign, name tag or jersey in the photo";
   imageText.addEventListener("input", () => actions.onImageTextInput(imageText.value));
 
@@ -93,6 +94,13 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const continueButton = button("Share without checking", "secondary", () => actions.onContinue());
   const buttonRow = el("div", "actions");
   buttonRow.append(backButton, continueButton, checkButton);
+  // What "Check this post" sends. Shown before the user clicks it.
+  const consent = el(
+    "p",
+    "hint consent-note",
+    "“Check this post” sends your caption and the photo text above (as text only) to your Second Look backend, " +
+      "which uses a cloud AI model to analyze it. The photo itself never leaves your computer. Nothing is sent until you click it.",
+  );
 
   const shareReady = el("p", "share-ready", "Ready. Click Instagram's Share button to post.");
   shareReady.hidden = true;
@@ -118,7 +126,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
 
   const resultEls: ResultElements = { root: results, summary, markedDraft, findings, meta, mockBanner, incompleteBanner };
 
-  panel.append(head, intro, imageLabel, imageHint, imageText, buttonRow, shareReady, message, results);
+  panel.append(head, intro, imageLabel, imageHint, imageText, consent, buttonRow, shareReady, message, results);
   shadow.append(style, launcher, panel);
   document.documentElement.append(host);
 
@@ -138,7 +146,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       intro.textContent =
         reason === "share-clicked"
           ? "Second Look paused sharing so you can check what this post could reveal. Nothing has been posted."
-          : "Check what this post could reveal. Only text is sent to your local Second Look backend; the photo stays on your computer.";
+          : "Check what this post could reveal. The photo's text is read on your computer; review it below before checking.";
       panel.hidden = false;
       launcher.hidden = true;
     },

@@ -54,11 +54,17 @@ const common = {
 };
 
 const builds = [
-  // The popup, the service worker and the OCR demo page are ES modules.
-  // Output names: dist/popup.js, dist/background.js, dist/ocr-demo.js
+  // The popup, the service worker, the offscreen OCR page (reads the Instagram
+  // photo locally) and the OCR demo page are ES modules.
+  // Output names: dist/popup.js, dist/background.js, dist/offscreen.js, dist/ocr-demo.js
   {
     ...common,
-    entryPoints: { popup: "src/popup.ts", background: "src/background.ts", "ocr-demo": "src/ocr/demo/demo.ts" },
+    entryPoints: {
+      popup: "src/popup.ts",
+      background: "src/background.ts",
+      offscreen: "src/offscreen.ts",
+      "ocr-demo": "src/ocr/demo/demo.ts",
+    },
     format: "esm",
   },
   // Content scripts can't be ES modules, so the Instagram script is one plain file.

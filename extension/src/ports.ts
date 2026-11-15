@@ -1,6 +1,7 @@
 // "Ports": the agreed shapes of modules that other teammates are still
 // building. The Instagram integration codes against these interfaces, and
-// uses the simple stand-ins below until the real modules exist.
+// uses the simple stand-ins below where the real modules aren't connected
+// yet (history). OCR is connected: content/offscreen-ocr.ts.
 //
 //   OcrPort       -> Person B (OCR), will live in extension/src/ocr/
 //   WarningPanel  -> Person D (warning interface); default: content/overlay.ts
@@ -18,9 +19,9 @@ import type { OcrResult } from "./ocr";
 /**
  * Same shape as Person B's readImageText() in src/ocr/. On instagram.com it
  * can't be called directly (the OCR worker can't start inside a content
- * script, see src/ocr/README.md), so a real OcrPort for Instagram will pass
- * the photo to an extension page (an offscreen document) that runs OCR there.
- * That is not built yet, so Instagram uses `unavailableOcr`.
+ * script, see src/ocr/README.md), so Instagram uses `offscreenOcr`
+ * (content/offscreen-ocr.ts), which passes the photo to the offscreen
+ * extension page (offscreen.html) that runs OCR there, inside the browser.
  */
 export interface OcrPort {
   /** false while OCR can't run here; the panel then asks the user to type photo text. */
@@ -29,7 +30,7 @@ export interface OcrPort {
   readImageText(image: Blob, index: number): Promise<OcrResult>;
 }
 
-/** Stand-in until OCR can run for Instagram: never called (available is false). */
+/** Stand-in for places where OCR can't run (e.g. tests): never called (available is false). */
 export const unavailableOcr: OcrPort = {
   available: false,
   async readImageText(): Promise<OcrResult> {
@@ -43,7 +44,8 @@ export const unavailableOcr: OcrPort = {
 
 /** What the panel's buttons do. main.ts provides these. */
 export interface WarningPanelActions {
-  onCheck(): void;                       // "Check this post"
+  onOpen(): void;                        // the corner button: open the panel only (sends nothing)
+  onCheck(): void;                       // "Check this post": the user's OK to send the text for analysis
   onBack(): void;                        // "Back to editing"
   onContinue(): void;                    // "Continue to Share" (checked or not)
   onApplyEdit(edit: SuggestedEdit): void;

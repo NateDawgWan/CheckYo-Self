@@ -18,6 +18,7 @@
       "run_at": "document_start"
     }
   ],
+  "permissions": ["offscreen"],
   "host_permissions": ["http://127.0.0.1:8787/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
