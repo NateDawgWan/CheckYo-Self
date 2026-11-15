@@ -17,6 +17,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
  */
 export function sourceLabel(source: TextSource | undefined, sourceId: string, photoCount = 1): string {
   if (sourceId === "caption") return "Caption";
+  if (sourceId === "profile") return "Your past posts (profile)";
   if (sourceId.startsWith("image_text")) {
     const n = sourceId.split(":")[1];
     return photoCount > 1 && n ? `Photo ${n} text` : "Photo text";

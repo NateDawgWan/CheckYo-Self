@@ -6,11 +6,14 @@ import type {
   AnalyzeResponse,
   ExtensionMessage,
   InstagramDraftReply,
+  StoredHistoryPost,
   SuggestedEdit,
   TextSource,
 } from "../../shared/contract";
 import { analyzeDraft, checkHealth, describeBackendStatus, hashSources } from "./api";
+import { historySourcesFor, preselect, suggestionMeta, type Suggestion } from "./compare";
 import { applyEditToText } from "./edits";
+import { analyzeWithHistory, getPortfolio, listHistory, suggestHistory } from "./history-api";
 import { OcrError, readImageText } from "./ocr";
 import { describePhotoRead, photoProgressLabel, PHOTO_TEXT_MAX_CHARS, type PhotoReadNotice } from "./photo-text";
 import { renderResults, type ResultElements } from "./render";
@@ -44,6 +47,14 @@ const photoPreview = byId<HTMLImageElement>("photo-preview");
 const photoProgress = byId<HTMLProgressElement>("photo-progress");
 const photoStatus = byId<HTMLParagraphElement>("photo-status");
 const photoNotices = byId<HTMLDivElement>("photo-notices");
+const compareToggle = byId<HTMLButtonElement>("compare-toggle");
+const comparePanel = byId<HTMLDivElement>("compare-panel");
+const compareStatus = byId<HTMLParagraphElement>("compare-status");
+const compareList = byId<HTMLUListElement>("compare-list");
+const compareRefresh = byId<HTMLButtonElement>("compare-refresh");
+const compareProfileRow = byId<HTMLLabelElement>("compare-profile-row");
+const compareProfile = byId<HTMLInputElement>("compare-profile");
+const compareProfileLabel = byId<HTMLSpanElement>("compare-profile-label");
 const resultEls: ResultElements = {
   root: byId("results"),
   summary: byId("summary"),
@@ -195,6 +206,83 @@ function removePhoto() {
   ocrFilledText = null;
 }
 
+// ---------------------------------------------------------------------------
+// "Compare with my past posts" (optional; see compare.ts)
+// ---------------------------------------------------------------------------
+
+let savedPosts: StoredHistoryPost[] = [];
+const comparePicked = new Set<string>();
+
+function isComparing(): boolean {
+  return !comparePanel.hidden;
+}
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** Asks the backend which saved posts look related to the draft (no AI call), and lists them. */
+async function loadSuggestions() {
+  compareStatus.textContent = "Looking for related past posts…";
+  compareStatus.dataset.kind = "info";
+  compareList.replaceChildren();
+  let suggestions: Suggestion[];
+  try {
+    savedPosts = (await listHistory()).posts;
+    if (savedPosts.length === 0) {
+      compareStatus.textContent = "You haven't saved any past posts yet. Import some with the link below, or save posts after you share them on Instagram.";
+      comparePicked.clear();
+      return;
+    }
+    suggestions = (await suggestHistory(collectSources().filter((s) => s.text.trim()))).suggestions;
+    // The profile, if one was built: offered (ticked) but the user can untick it.
+    const profile = await getPortfolio();
+    compareProfileRow.hidden = profile.facts.length === 0;
+    compareProfileLabel.textContent = `Use my profile: ${profile.facts.length} fact${profile.facts.length === 1 ? "" : "s"} from ${profile.scannedPosts} saved post${profile.scannedPosts === 1 ? "" : "s"} (finds links even without shared words)`;
+  } catch (err) {
+    compareStatus.textContent = (err as Error).message;
+    compareStatus.dataset.kind = "error";
+    return;
+  }
+  comparePicked.clear();
+  for (const id of preselect(suggestions)) comparePicked.add(id);
+  const byId = new Map(savedPosts.map((p) => [p.postId, p]));
+  compareStatus.textContent =
+    comparePicked.size > 0
+      ? `${comparePicked.size} of your ${savedPosts.length} saved posts look related and are ticked. Untick any you don't want included.`
+      : `None of your ${savedPosts.length} saved posts share words with this draft. Tick any you want to include anyway.`;
+  compareList.replaceChildren(
+    ...suggestions.map((s) => {
+      const post = byId.get(s.postId);
+      const li = document.createElement("li");
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = comparePicked.has(s.postId);
+      box.addEventListener("change", () => {
+        if (box.checked) comparePicked.add(s.postId);
+        else comparePicked.delete(s.postId);
+      });
+      const text = document.createElement("span");
+      text.className = "compare-caption";
+      text.textContent = post?.caption || "(no caption)"; // textContent only: captions are untrusted
+      const meta = document.createElement("span");
+      meta.className = "compare-meta";
+      meta.textContent = suggestionMeta(s, shortDate);
+      label.append(box, text, meta);
+      li.append(label);
+      return li;
+    }),
+  );
+}
+
+function setComparing(open: boolean) {
+  comparePanel.hidden = !open;
+  compareToggle.setAttribute("aria-expanded", String(open));
+  compareToggle.firstChild!.textContent = open ? "− Don't compare with past posts " : "+ Compare with my past posts ";
+  if (open) void loadSuggestions();
+}
+
 async function analyze() {
   if (currentScan) {
     // Don't send a draft without the photo text the user hasn't seen yet.
@@ -212,16 +300,25 @@ async function analyze() {
   setMessage("Checking your post…");
   try {
     const draftHash = await hashSources(sources);
-    const result = await analyzeDraft(sources, draftHash);
+    const pastIds = isComparing() ? [...comparePicked] : [];
+    const useProfile = isComparing() && !compareProfileRow.hidden && compareProfile.checked;
+    const result =
+      pastIds.length > 0 || useProfile ? await analyzeWithHistory(sources, draftHash, pastIds, useProfile) : await analyzeDraft(sources, draftHash);
     lastResult = result;
-    renderResults(resultEls, result, sources, applyEdit);
-    renderVerdict(verdictEls, result, sources);
+    // Show (and highlight) the earlier posts that were used, after the draft.
+    const shown = [...sources, ...historySourcesFor(result, savedPosts)];
+    renderResults(resultEls, result, shown, applyEdit);
+    renderVerdict(verdictEls, result, shown);
     const n = result.findings.length;
+    const parts: string[] = [];
+    if (result.historyUsed.length) parts.push(`${result.historyUsed.length} past post${result.historyUsed.length === 1 ? "" : "s"}`);
+    if (result.portfolioUsed) parts.push(`your profile (${result.portfolioUsed.facts} facts)`);
+    const compared = parts.length ? ` Compared with ${parts.join(" and ")}.` : "";
     if (result.droppedFindings > 0) {
       // Some warnings could not be checked, so don't call this "complete".
-      setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${result.droppedFindings} not shown.`, "error");
+      setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${result.droppedFindings} not shown.${compared}`, "error");
     } else {
-      setMessage(n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`);
+      setMessage((n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`) + compared);
     }
     await updateStaleness(); // the user may have typed while we waited
   } catch (err) {
@@ -306,6 +403,8 @@ photoCancelButton.addEventListener("click", () => currentScan?.abort());
 photoRemoveButton.addEventListener("click", removePhoto);
 window.addEventListener("pagehide", () => currentScan?.abort()); // popup closed: stop reading
 analyzeButton.addEventListener("click", analyze);
+compareToggle.addEventListener("click", () => setComparing(comparePanel.hidden));
+compareRefresh.addEventListener("click", () => void loadSuggestions());
 reanalyzeButton.addEventListener("click", analyze);
 sampleButton.addEventListener("click", () => {
   removePhoto(); // the sample has its own photo text

@@ -79,6 +79,13 @@ export interface AnalyzeRequest {
    * POST /api/history/suggest.
    */
   historyPostIds?: string[];
+  /**
+   * Also use this user's PROFILE: the short list of facts found in ALL their
+   * saved posts (POST /api/history/portfolio/scan). Lets a check connect the
+   * draft to any earlier post, even ones sharing no words (half a name in an
+   * old post, the other half now). Needs the USER_ID_HEADER. Opt-in.
+   */
+  usePortfolio?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +190,11 @@ export interface AnalyzeResponse {
    * Evidence with sourceId "history:<postId>" refers to these.
    */
   historyUsed: Array<{ sourceId: string; postId: string; publishedAt: string }>;
+  /**
+   * Set when the user's profile was used (usePortfolio): how many facts, from
+   * how many posts. Evidence with sourceId "profile" quotes the profile.
+   */
+  portfolioUsed?: { facts: number; posts: number };
 }
 
 export type ErrorCode =
@@ -246,6 +258,8 @@ export interface HealthResponse {
 //   DELETE /api/history/posts/:postId                -> HistoryDeleteResponse
 //   POST   /api/history/approvals/:approvalId/revoke -> HistoryDeleteResponse
 //   DELETE /api/history                              -> HistoryDeleteResponse  ("delete all my history")
+//   POST   /api/history/portfolio/scan               PortfolioScanRequest -> PortfolioScanResponse
+//   GET    /api/history/portfolio                    -> PortfolioResponse
 // ---------------------------------------------------------------------------
 
 export const HISTORY_LIMITS = {
@@ -321,6 +335,44 @@ export interface HistorySuggestResponse {
   suggestions: Array<{ postId: string; publishedAt: string; sharedWords: number }>;
 }
 
+/**
+ * The profile ("portfolio"): facts found in the user's saved posts by the AI,
+ * each with an exact quote from its post (verified by the backend). Facts are
+ * AI interpretations: they are deleted with their posts.
+ */
+export interface PortfolioFact {
+  postId: string;
+  publishedAt: string;
+  category: Category;
+  severity: Level;
+  /** Short and specific, e.g. "First name: Sarah". */
+  fact: string;
+  /** Copied exactly from the post. */
+  quote: string;
+}
+
+/** Scans up to a few batches of not-yet-scanned saved posts. Call again until remaining is 0. */
+export interface PortfolioScanRequest {
+  contractVersion: typeof CONTRACT_VERSION;
+}
+
+export interface PortfolioScanResponse {
+  contractVersion: typeof CONTRACT_VERSION;
+  scannedNow: number;
+  scannedPosts: number;
+  totalPosts: number;
+  /** Saved posts still to scan. */
+  remaining: number;
+  facts: number;
+}
+
+export interface PortfolioResponse {
+  contractVersion: typeof CONTRACT_VERSION;
+  totalPosts: number;
+  scannedPosts: number;
+  facts: PortfolioFact[];
+}
+
 export interface HistoryDeleteResponse {
   contractVersion: typeof CONTRACT_VERSION;
   /** Observed posts deleted. */
@@ -349,15 +401,51 @@ export interface HistoryDeleteResponse {
  *                           page showed a confirmed publication (not on cancel,
  *                           failure or "unknown").
  *  - "get-instagram-draft": popup -> content script. Reply: InstagramDraftReply.
+ *  - "save-to-history":     content script -> service worker, ONLY after the user
+ *                           clicked "Save" on the prompt shown after a CONFIRMED
+ *                           share. The worker imports it as one approved, published
+ *                           history post (text only). Reply: SaveToHistoryReply.
+ *  - "get-history-suggestions": content script -> service worker, ONLY when the
+ *                           user opened "Compare with my past posts" in the panel.
+ *                           Reply: HistorySuggestionsReply (their saved posts that
+ *                           look related, and whether a profile exists).
+ *  - "open-history-page":   content script -> service worker: open history.html.
  *  - "get-backend-status":  content script -> service worker. The worker asks
  *                           GET /api/health (no Databricks call) and replies with
  *                           a BackendStatusReply for the Instagram panel's pill.
  */
 export type ExtensionMessage =
-  | { kind: "check-draft"; requestId: number; draftHash: string; sources: TextSource[] }
+  | {
+      kind: "check-draft";
+      requestId: number;
+      draftHash: string;
+      sources: TextSource[];
+      /** Opt-in (the panel's Compare section): earlier posts the user ticked, and/or the profile. */
+      historyPostIds?: string[];
+      usePortfolio?: boolean;
+    }
+  | { kind: "get-history-suggestions"; sources: TextSource[] }
+  | { kind: "open-history-page" }
   | { kind: "post-published"; draftHash: string; postId: string | null; publishedAt: string }
   | { kind: "get-instagram-draft" }
-  | { kind: "get-backend-status" };
+  | { kind: "get-backend-status" }
+  | { kind: "save-to-history"; caption: string; imageText: string; publishedAt: string };
+
+/** Reply to "get-history-suggestions". */
+export type HistorySuggestionsReply =
+  | {
+      kind: "history-suggestions";
+      /** Saved posts that look related to the draft, most related first (at most maxPostsPerAnalysis). */
+      suggestions: Array<{ postId: string; publishedAt: string; sharedWords: number; caption: string; imageText?: string }>;
+      savedPosts: number;
+      profile: { facts: number; scannedPosts: number };
+    }
+  | { kind: "history-error"; message: string };
+
+/** Reply to "save-to-history". */
+export type SaveToHistoryReply =
+  | { kind: "history-saved"; postId: string }
+  | { kind: "history-error"; message: string };
 
 /**
  * Reply to "get-backend-status": what the status pill shows. Same values as

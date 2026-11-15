@@ -64,7 +64,8 @@ const builds = [
       background: "src/background.ts",
       offscreen: "src/offscreen.ts",
       "ocr-demo": "src/ocr/demo/demo.ts",
-      dashboard: "src/dashboard/main.ts", // the full-page CheckYo'Self dashboard (public/dashboard.html)
+      dashboard: "src/dashboard/main.ts",
+      history: "src/history-page.ts", // the history page (public/history.html): import, list, delete past posts // the full-page CheckYo'Self dashboard (public/dashboard.html)
     },
     format: "esm",
   },
