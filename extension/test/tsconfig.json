@@ -1,0 +1,8 @@
+{
+  // Type-checks the tests. They run in Node (not Chrome), so they also get Node's types.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["chrome", "node"]
+  },
+  "include": [".", "../src", "../../shared"]
+}
