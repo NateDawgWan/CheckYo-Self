@@ -112,6 +112,8 @@ curl http://127.0.0.1:8787/api/health     # shows mode, databricks.state and his
 
 ## Rules
 
+- The product name is **CheckYo'Self** (shown in the popup, Instagram panel, dashboard and manifest). Some internal identifiers keep the old name "Second Look" on purpose, because renaming them would break things: the `X-Second-Look-User` header (shared with the Databricks App and stored history), the npm package names, the `second-look-panel` element and the Databricks service principal names.
+
 - Never commit `.env` or put secrets in `extension/`. Secrets come from environment variables on the backend.
 - Never log post text, user ids, tokens, or Databricks response bodies on the backend; log request IDs, statuses and counts.
 - Don't claim a Databricks feature works until its live check (`check:databricks`, `check:history`) passes, and record the result in `docs/TEST_RESULTS.md`.

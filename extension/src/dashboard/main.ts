@@ -1,5 +1,5 @@
 // Entry point of the dashboard page (dashboard.html, built to dist/dashboard.js).
-// Open it from chrome://extensions -> Second Look -> Details -> Extension options,
+// Open it from chrome://extensions -> CheckYo'Self -> Details -> Extension options,
 // or at chrome-extension://<extension id>/dashboard.html.
 //
 // It shows either the FICTIONAL sample report or "My checks": posts the user

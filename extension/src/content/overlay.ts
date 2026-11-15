@@ -66,16 +66,16 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   // popup.css styles :root and body; inside a shadow root the equivalent is :host.
   style.textContent = popupCss.replaceAll(":root", ":host") + PANEL_CSS;
 
-  const launcher = button("Second Look: Check this post", "primary launcher", () => actions.onCheck());
+  const launcher = button("CheckYo'Self: Check this post", "primary launcher", () => actions.onCheck());
   launcher.hidden = true;
 
   const panel = el("section", "panel");
   panel.hidden = true;
   panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-label", "Second Look");
+  panel.setAttribute("aria-label", "CheckYo'Self");
 
   const head = el("div", "panel-head");
-  const title = el("h1", undefined, "Second Look");
+  const title = el("h1", undefined, "CheckYo'Self");
   head.append(title, button("Close", "secondary small close", () => actions.onBack()));
   const intro = el("p", "intro");
 
@@ -137,8 +137,8 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       title.textContent = reason === "share-clicked" ? "Before you share" : "Check this post";
       intro.textContent =
         reason === "share-clicked"
-          ? "Second Look paused sharing so you can check what this post could reveal. Nothing has been posted."
-          : "Check what this post could reveal. Only text is sent to your local Second Look backend; the photo stays on your computer.";
+          ? "CheckYo'Self paused sharing so you can check what this post could reveal. Nothing has been posted."
+          : "Check what this post could reveal. Only text is sent to your local CheckYo'Self backend; the photo stays on your computer.";
       panel.hidden = false;
       launcher.hidden = true;
     },
@@ -183,8 +183,8 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       // After "Continue" the panel closes (it can cover Instagram's Share
       // button), so the corner button tells the user what to do next.
       launcher.textContent = ready
-        ? "Second Look: ready. Click Instagram's Share to post."
-        : "Second Look: Check this post";
+        ? "CheckYo'Self: ready. Click Instagram's Share to post."
+        : "CheckYo'Self: Check this post";
     },
     destroy() {
       host.remove();

@@ -97,7 +97,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       }
       if (imageKey !== null || flow.isShareAllowed(Date.now())) {
         // The user closed the composer or went back a step without sharing.
-        if (flow.isShareAllowed(Date.now())) console.info("[Second Look] Share outcome: cancelled");
+        if (flow.isShareAllowed(Date.now())) console.info("[CheckYo'Self] Share outcome: cancelled");
         flow.composerClosed();
         imageKey = null;
         imageText = "";
@@ -244,12 +244,12 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       const message: ExtensionMessage = { kind: "check-draft", requestId, draftHash, sources };
       reply = await chrome.runtime.sendMessage(message);
     } catch {
-      reply = { kind: "check-error", requestId, message: "Second Look was reloaded. Refresh this page and try again." };
+      reply = { kind: "check-error", requestId, message: "CheckYo'Self was reloaded. Refresh this page and try again." };
     }
 
     if (!reply || reply.kind === "rejected") {
       if (flow.receiveError(requestId) === "accepted") {
-        p.setMessage(reply ? reply.reason : "No answer from Second Look. Try again.", "error");
+        p.setMessage(reply ? reply.reason : "No answer from CheckYo'Self. Try again.", "error");
       }
     } else if (reply.kind === "check-error") {
       if (flow.receiveError(reply.requestId) === "accepted") p.setMessage(reply.message, "error");
@@ -398,7 +398,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   }
 
   async function reportOutcome(outcome: PublishOutcome) {
-    console.info(`[Second Look] Share outcome: ${outcome}`);
+    console.info(`[CheckYo'Self] Share outcome: ${outcome}`);
     if (outcome !== "published" || !sharedDraftHash) return; // only CONFIRMED posts count
     const message: ExtensionMessage = {
       kind: "post-published",

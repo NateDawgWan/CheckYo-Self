@@ -1,4 +1,4 @@
-# Second Look
+# CheckYo'Self
 
 A Chrome extension that shows what an Instagram post could reveal about you before you share it, including things that only become revealing when combined with your earlier posts. Built for MadHacks 2026.
 
@@ -30,10 +30,10 @@ Load the extension in Chrome:
 
 1. Open `chrome://extensions` and turn on **Developer mode** (top right).
 2. Click **Load unpacked** and pick the `extension/dist` folder.
-3. Pin "Second Look" from the puzzle-piece menu and click it.
+3. Pin "CheckYo'Self" from the puzzle-piece menu and click it.
 4. Click **Use sample post**, then **Check this post**.
 
-**On Instagram (single-photo posts, English):** with the backend running, open instagram.com, click **Create**, pick one photo and go to the caption step. A **Second Look: Check this post** button appears at the bottom-right, and clicking **Share** first shows a "Before you share" panel. Second Look never shares for you: after **Continue to Share**, click Instagram's Share button yourself. See [docs/ROADMAP.md](docs/ROADMAP.md) for what has and hasn't been tested.
+**On Instagram (single-photo posts, English):** with the backend running, open instagram.com, click **Create**, pick one photo and go to the caption step. A **CheckYo'Self: Check this post** button appears at the bottom-right, and clicking **Share** first shows a "Before you share" panel. CheckYo'Self never shares for you: after **Continue to Share**, click Instagram's Share button yourself. See [docs/ROADMAP.md](docs/ROADMAP.md) for what has and hasn't been tested.
 
 After changing extension code, rebuild (or leave `npm run watch` running) and click the reload icon on the extension's card in `chrome://extensions`.
 

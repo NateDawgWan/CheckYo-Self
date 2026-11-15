@@ -323,10 +323,10 @@ export async function writeCaption(editor: HTMLElement, text: string): Promise<b
     write();
     await pause(120); // the editor updates the page a moment later
     if (captionIs(editor, text)) {
-      console.info(`[Second Look] Caption changed using: ${name}`);
+      console.info(`[CheckYo'Self] Caption changed using: ${name}`);
       return true;
     }
-    console.info(`[Second Look] Changing the caption using "${name}" did not work.`);
+    console.info(`[CheckYo'Self] Changing the caption using "${name}" did not work.`);
   }
   return false;
 }
