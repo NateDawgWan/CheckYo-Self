@@ -64,6 +64,7 @@ extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
 extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
+extension/src/dashboard/      Full-page dashboard (public/dashboard.html, opened as the extension's Options page): scores, cross-post view, offline keyword-rule mode
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend
 extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
 extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
