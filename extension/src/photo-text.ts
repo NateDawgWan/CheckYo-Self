@@ -114,3 +114,49 @@ export function assessPhotoQuality(result: OcrResult): QualityReport {
   }
   return { level: "clean", noisyWordCount: 0, wordCount: words.length, examples: [], message: null };
 }
+
+// ---------------------------------------------------------------------------
+// What to show after a read (used by the popup's "Add a photo")
+// ---------------------------------------------------------------------------
+
+/** One notice about the photo read. Same shape as PhotoNotice in ports.ts. */
+export interface PhotoReadNotice {
+  kind: "poor" | "warning";
+  text: string;
+}
+
+/** Everything a UI needs after one OCR read: the text to put in the box, notices, and a hint. */
+export interface PhotoReadView {
+  /** The photo text, already cut to PHOTO_TEXT_MAX_CHARS. The user reviews it before checking. */
+  text: string;
+  /** Poor-quality / noisy / truncated notices (empty when the read is clean). */
+  notices: PhotoReadNotice[];
+  /** One line under the box: where the text came from and what to do next. */
+  hint: string;
+  quality: PhotoQuality;
+  truncated: boolean;
+}
+
+/**
+ * Applies the size limit and the quality check to one OCR result.
+ * Same rules (and notice texts) as the Instagram panel in content/main.ts.
+ */
+export function describePhotoRead(result: OcrResult): PhotoReadView {
+  const limited = limitPhotoText(result.text);
+  const quality = assessPhotoQuality(result);
+  const notices: PhotoReadNotice[] = [];
+  if (quality.message) notices.push({ kind: quality.level === "poor" ? "poor" : "warning", text: quality.message });
+  if (limited.truncated) notices.push({ kind: "warning", text: truncationNotice(limited) });
+  const sure = result.confidence === null ? "" : ` (confidence ${Math.round(result.confidence)}%)`;
+  const hint =
+    result.status === "no_text" || !limited.text.trim()
+      ? "No text found in the photo. Type any text you can see in it."
+      : `Read from the photo on your computer${sure}. Check it and fix any mistakes before checking the post.`;
+  return { text: limited.text, notices, hint, quality: quality.level, truncated: limited.truncated };
+}
+
+/** Progress line while a photo is read, e.g. "Reading text… 40%". */
+export function photoProgressLabel(stage: "preparing_image" | "loading_engine" | "recognizing", fraction: number): string {
+  const label = { preparing_image: "Opening the photo", loading_engine: "Starting the text reader", recognizing: "Reading text" }[stage];
+  return `${label}… ${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
+}
