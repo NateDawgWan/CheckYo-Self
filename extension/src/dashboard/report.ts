@@ -52,11 +52,51 @@ const CONFIDENCE_FACTOR: Record<Level, number> = { high: 1, medium: 0.8, low: 0.
 /** A pattern that needs several posts gets 20% extra: it's what this tool is for. */
 const CROSS_POST_BONUS = 1.2;
 
+/**
+ * Categories where ONE leak can do serious harm on its own: ID numbers
+ * (Social Security, passport, license, birthday), money (card or bank
+ * numbers), health, and children (a kid's name with their school, team or
+ * age can be used to find them). They weigh 1.5x and get higher minimum
+ * scores (see below).
+ */
+export const SENSITIVE_CATEGORIES: readonly Category[] = ["identity", "financial", "health", "children"];
+const SENSITIVE_BONUS = 1.5;
+
 /** One finding's weight, between 0 and 0.95. */
 export function findingWeight(finding: Finding, crossPost: boolean): number {
   let points = SEVERITY_POINTS[finding.severity] * CONFIDENCE_FACTOR[finding.confidence];
+  if (SENSITIVE_CATEGORIES.includes(finding.category)) points *= SENSITIVE_BONUS;
   if (crossPost) points *= CROSS_POST_BONUS;
   return Math.min(0.95, points / 100);
+}
+
+/**
+ * The lowest score a post can get because of ONE finding. Without this, a
+ * single very serious finding (for example a Social Security number) could
+ * only reach 30, because the formula below adds findings up.
+ *   high + sensitive category   -> 75 (critical)
+ *   high                        -> 50 (high)
+ *   medium + sensitive category -> 50 (high)
+ *   medium                      -> 25 (moderate)
+ *   low                         -> 0
+ * If the AI is NOT sure (low confidence), the minimum is halved.
+ */
+export function findingFloor(finding: Finding): number {
+  const sensitive = SENSITIVE_CATEGORIES.includes(finding.category);
+  let floor = 0;
+  if (finding.severity === "high") floor = sensitive ? 75 : 50;
+  else if (finding.severity === "medium") floor = sensitive ? 50 : 25;
+  return finding.confidence === "low" ? Math.round(floor / 2) : floor;
+}
+
+/**
+ * The score for a set of findings: they add up (combineScores), but never
+ * below the worst single finding's minimum (findingFloor).
+ */
+export function scoreFindings(findings: { finding: Finding; weight: number }[]): number {
+  const combined = combineScores(findings.map((f) => f.weight));
+  const floor = Math.max(0, ...findings.map((f) => findingFloor(f.finding)));
+  return Math.max(combined, floor);
 }
 
 /**
@@ -258,10 +298,10 @@ export function buildReport(posts: AnalyzedPost[]): DashboardReport {
     }
   }
 
-  const score = combineScores(findings.map((f) => f.weight));
+  const score = scoreFindings(findings);
   const groups: GroupScore[] = RISK_GROUPS.map((g) => {
     const inGroup = findings.filter((f) => f.group === g.key);
-    return { key: g.key, label: g.label, score: combineScores(inGroup.map((f) => f.weight)), count: inGroup.length };
+    return { key: g.key, label: g.label, score: scoreFindings(inGroup), count: inGroup.length };
   });
   const crossPost = findings.filter((f) => f.crossPost).sort((a, b) => b.weight - a.weight);
 
@@ -279,7 +319,7 @@ export function buildReport(posts: AnalyzedPost[]): DashboardReport {
 
 /** Score for one post: every finding whose evidence touches that post. */
 export function postScore(report: DashboardReport, postId: string): number {
-  return combineScores(report.findings.filter((f) => f.postIds.includes(postId)).map((f) => f.weight));
+  return scoreFindings(report.findings.filter((f) => f.postIds.includes(postId)));
 }
 
 /** Findings that touch one post, most serious first. */

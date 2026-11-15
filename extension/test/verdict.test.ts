@@ -76,3 +76,42 @@ test("several serious findings give HIGH and ranked advice", () => {
   assert.ok(v.advice.length >= 2);
   assert.ok(v.advice.length <= 4);
 });
+
+// --- one serious finding is enough (risk score update) ------------------------------
+
+test("a post whose only problem is a Social Security number is HIGH, not MEDIUM", () => {
+  // Reported case: one high-severity identity finding used to score 30 / MEDIUM.
+  const ssn = finding({ category: "identity", severity: "high", confidence: "high", evidence: [{ sourceId: "caption", quote: "676-76-6969", verified: true }] });
+  const v = verdictFor(response([ssn]), [{ id: "caption", type: "caption", text: "My social security number is: 676-76-6969" }]);
+  assert.ok(v.score >= 75, `score was ${v.score}`);
+  assert.equal(v.stamp, "HIGH");
+});
+
+test("any single high-severity finding reaches HIGH", () => {
+  const v = verdictFor(response([finding({ category: "location", severity: "high" })]), sources);
+  assert.ok(v.score >= 50, `score was ${v.score}`);
+  assert.equal(v.stamp, "HIGH");
+});
+
+test("card numbers, health details and children count as sensitive too", () => {
+  for (const category of ["financial", "health", "children"] as const) {
+    const v = verdictFor(response([finding({ category, severity: "high" })]), sources);
+    assert.ok(v.score >= 75, `${category}: score was ${v.score}`);
+  }
+});
+
+test("a single medium finding is MEDIUM; a single low one stays LOW", () => {
+  assert.equal(verdictFor(response([finding({ severity: "medium" })]), sources).stamp, "MEDIUM");
+  assert.equal(verdictFor(response([finding({ severity: "low" })]), sources).stamp, "LOW");
+});
+
+test("when the AI isn't sure, the minimum is halved (no scare from a guess)", () => {
+  const unsure = verdictFor(response([finding({ category: "identity", severity: "high", confidence: "low" })]), sources);
+  assert.ok(unsure.score < 75, `score was ${unsure.score}`);
+  assert.ok(unsure.score >= 37);
+});
+
+test("an incomplete check is still stamped INCOMPLETE, even with a severe finding", () => {
+  const v = verdictFor(response([finding({ category: "identity", severity: "high" })], 1), sources);
+  assert.equal(v.stamp, "INCOMPLETE");
+});
