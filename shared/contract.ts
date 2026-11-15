@@ -405,16 +405,42 @@ export interface HistoryDeleteResponse {
  *                           clicked "Save" on the prompt shown after a CONFIRMED
  *                           share. The worker imports it as one approved, published
  *                           history post (text only). Reply: SaveToHistoryReply.
+ *  - "get-history-suggestions": content script -> service worker, ONLY when the
+ *                           user opened "Compare with my past posts" in the panel.
+ *                           Reply: HistorySuggestionsReply (their saved posts that
+ *                           look related, and whether a profile exists).
+ *  - "open-history-page":   content script -> service worker: open history.html.
  *  - "get-backend-status":  content script -> service worker. The worker asks
  *                           GET /api/health (no Databricks call) and replies with
  *                           a BackendStatusReply for the Instagram panel's pill.
  */
 export type ExtensionMessage =
-  | { kind: "check-draft"; requestId: number; draftHash: string; sources: TextSource[] }
+  | {
+      kind: "check-draft";
+      requestId: number;
+      draftHash: string;
+      sources: TextSource[];
+      /** Opt-in (the panel's Compare section): earlier posts the user ticked, and/or the profile. */
+      historyPostIds?: string[];
+      usePortfolio?: boolean;
+    }
+  | { kind: "get-history-suggestions"; sources: TextSource[] }
+  | { kind: "open-history-page" }
   | { kind: "post-published"; draftHash: string; postId: string | null; publishedAt: string }
   | { kind: "get-instagram-draft" }
   | { kind: "get-backend-status" }
   | { kind: "save-to-history"; caption: string; imageText: string; publishedAt: string };
+
+/** Reply to "get-history-suggestions". */
+export type HistorySuggestionsReply =
+  | {
+      kind: "history-suggestions";
+      /** Saved posts that look related to the draft, most related first (at most maxPostsPerAnalysis). */
+      suggestions: Array<{ postId: string; publishedAt: string; sharedWords: number; caption: string; imageText?: string }>;
+      savedPosts: number;
+      profile: { facts: number; scannedPosts: number };
+    }
+  | { kind: "history-error"; message: string };
 
 /** Reply to "save-to-history". */
 export type SaveToHistoryReply =

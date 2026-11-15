@@ -51,12 +51,26 @@ export interface WarningPanelActions {
   onApplyEdit(edit: SuggestedEdit): void;
   onImageTextInput(text: string, index: number): void;
   onSaveToHistory(): void;               // "Save to history" on the after-share prompt
-  onSkipSave(): void;                    // "No thanks"  // the user typed or corrected photo `index`'s text (1, 2, ...)
+  onSkipSave(): void;                    // "No thanks"
+  onCompareToggle(open: boolean): void;  // "+ Compare with my past posts" (optional)
+  onComparePick(postId: string, picked: boolean): void;
+  onUseProfile(use: boolean): void;
+  onOpenHistory(): void;                 // "Manage or import past posts"
 }
 
 export type MessageKind = "info" | "error";
 
 /** One notice about a photo read (see WarningPanel.setPhotos). */
+/** What the panel's Compare section shows. */
+export interface CompareView {
+  open: boolean;
+  status: string;
+  error: boolean;
+  /** "Use my profile…" (null when there's no profile). */
+  profile: { label: string; checked: boolean } | null;
+  items: Array<{ postId: string; caption: string; meta: string; checked: boolean }>;
+}
+
 /** What the panel shows for one photo. */
 export interface PhotoView {
   index: number;
@@ -91,6 +105,8 @@ export interface WarningPanel {
    * history?" ("ask"), then "saving", then a result ("done"), or hidden.
    */
   setSavePrompt(state: { kind: "ask" } | { kind: "saving" } | { kind: "done"; text: string; ok: boolean } | { kind: "hidden" }): void;
+  /** The optional "Compare with my past posts" section (closed by default). */
+  setCompare(view: CompareView): void;
   /** What the corner button says before the panel is opened (null: the default). */
   setLauncherPrompt(text: string | null): void;
   /** The Databricks/backend status pill in the panel's header (same states as the popup's pill). */

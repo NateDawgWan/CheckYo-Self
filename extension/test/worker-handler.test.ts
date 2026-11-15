@@ -28,15 +28,23 @@ function fakes(answer: () => Promise<AnalyzeResponse> = async () => response(), 
   const analyzed: TextSource[][] = [];
   const recorded: PublishedPostInfo[] = [];
   const saved: HistoryPost[] = [];
+  const analyzedWith: Array<{ historyPostIds: string[]; usePortfolio: boolean } | undefined> = [];
+  let openedHistory = 0;
   const history: HistoryClient = { async recordPublished(info) { recorded.push(info); } };
   const deps: WorkerDeps = {
     extensionId: OUR_ID,
-    analyze: async (sources) => { analyzed.push(sources); return answer(); },
+    analyze: async (sources, _hash, history) => { analyzed.push(sources); analyzedWith.push(history); return answer(); },
     history,
     backendStatus: status,
     saveToHistory: async (post) => { saved.push(post); },
+    historySuggestions: async () => ({
+      suggestions: [{ postId: "ig_1", publishedAt: "2024-03-09T12:00:00.000Z", sharedWords: 2, caption: "Season opener!" }],
+      savedPosts: 3,
+      profile: { facts: 4, scannedPosts: 3 },
+    }),
+    openHistoryPage: async () => { openedHistory++; },
   };
-  return { deps, analyzed, recorded, saved };
+  return { deps, analyzed, recorded, saved, analyzedWith, opened: () => openedHistory };
 }
 
 function checkDraft(sources: unknown, requestId = 7) {
@@ -191,4 +199,45 @@ test("a backend error while saving comes back as history-error", async () => {
   const { deps } = fakes();
   deps.saveToHistory = async () => { throw new Error("History is limited to 500 posts per user."); };
   assert.deepEqual(await handleWorkerMessage(SAVE, INSTAGRAM_TAB, deps), { kind: "history-error", message: "History is limited to 500 posts per user." });
+});
+
+// --- "Compare with my past posts" in the Instagram panel ----------------------------
+
+test("a check without Compare is a plain check; with Compare it carries the ticked posts and the profile", async () => {
+  const { deps, analyzedWith } = fakes();
+  const draft = [{ id: "caption", type: "caption", text: "Go Mitchells!" }];
+  await handleWorkerMessage(checkDraft(draft), INSTAGRAM_TAB, deps);
+  await handleWorkerMessage({ ...checkDraft(draft), historyPostIds: ["ig_1", "ig_1", "ig_2"], usePortfolio: true }, INSTAGRAM_TAB, deps);
+  await handleWorkerMessage({ ...checkDraft(draft), usePortfolio: false, historyPostIds: [] }, INSTAGRAM_TAB, deps);
+  assert.deepEqual(analyzedWith, [undefined, { historyPostIds: ["ig_1", "ig_2"], usePortfolio: true }, undefined]);
+});
+
+test("bad Compare choices are refused before anything is analyzed", async () => {
+  const { deps, analyzed } = fakes();
+  const draft = [{ id: "caption", type: "caption", text: "hi" }];
+  for (const bad of [{ historyPostIds: "ig_1" }, { historyPostIds: ["bad id!"] }, { historyPostIds: Array.from({ length: 9 }, (_, i) => `p${i}`) }, { usePortfolio: "yes" }]) {
+    assert.equal(((await handleWorkerMessage({ ...checkDraft(draft), ...bad }, INSTAGRAM_TAB, deps)) as { kind: string }).kind, "rejected");
+  }
+  assert.equal(analyzed.length, 0);
+});
+
+test("suggestions are only for our Instagram page, and only the draft (never history) can be sent", async () => {
+  const { deps } = fakes();
+  const draft = [{ id: "caption", type: "caption", text: "Season opener tonight" }];
+  const ok = await handleWorkerMessage({ kind: "get-history-suggestions", sources: draft }, INSTAGRAM_TAB, deps);
+  assert.equal((ok as { kind: string }).kind, "history-suggestions");
+  assert.deepEqual((ok as any).profile, { facts: 4, scannedPosts: 3 });
+  const notInstagram = await handleWorkerMessage({ kind: "get-history-suggestions", sources: draft }, POPUP, deps);
+  assert.equal((notInstagram as { kind: string }).kind, "rejected");
+  const smuggled = await handleWorkerMessage({ kind: "get-history-suggestions", sources: [{ id: "history:x", type: "history", text: "old" }] }, INSTAGRAM_TAB, deps);
+  assert.equal((smuggled as { kind: string }).kind, "rejected");
+});
+
+test("a failing suggestion lookup comes back as history-error; the history page opens only for our page", async () => {
+  const { deps, opened } = fakes();
+  deps.historySuggestions = async () => { throw new Error("Can't reach the backend."); };
+  assert.deepEqual(await handleWorkerMessage({ kind: "get-history-suggestions", sources: [] }, INSTAGRAM_TAB, deps), { kind: "history-error", message: "Can't reach the backend." });
+  await handleWorkerMessage({ kind: "open-history-page" }, INSTAGRAM_TAB, deps);
+  await handleWorkerMessage({ kind: "open-history-page" }, { id: OUR_ID, url: "https://example.com/", tab: {} }, deps);
+  assert.equal(opened(), 1);
 });

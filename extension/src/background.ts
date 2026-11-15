@@ -12,7 +12,7 @@
 // The worker talks ONLY to our local backend (BACKEND_URL in api.ts). It never
 // talks to Databricks and holds no credentials.
 import { analyzeDraft, checkHealth, describeBackendStatus } from "./api";
-import { importHistory } from "./history-api";
+import { analyzeWithHistory, getPortfolio, importHistory, listHistory, suggestHistory } from "./history-api";
 import { handleOcrImageMessage, isOcrImageMessage, type OcrRunMessage, type OcrRunReply } from "./ocr-relay";
 import { noHistory } from "./ports";
 import { handleWorkerMessage } from "./worker-handler";
@@ -30,7 +30,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   const deps = {
     extensionId: chrome.runtime.id,
-    analyze: analyzeDraft,
+    // With the panel's opt-in Compare choices, check together with them.
+    analyze: (sources: Parameters<typeof analyzeDraft>[0], draftHash: string, history?: { historyPostIds: string[]; usePortfolio: boolean }) =>
+      history ? analyzeWithHistory(sources, draftHash, history.historyPostIds, history.usePortfolio) : analyzeDraft(sources, draftHash),
+    historySuggestions: async (sources: Parameters<typeof analyzeDraft>[0]) => {
+      const saved = (await listHistory()).posts;
+      if (saved.length === 0) return { suggestions: [], savedPosts: 0, profile: { facts: 0, scannedPosts: 0 } };
+      const [ranked, profile] = await Promise.all([sources.length ? suggestHistory(sources) : Promise.resolve({ suggestions: [] }), getPortfolio()]);
+      const byId = new Map(saved.map((p) => [p.postId, p]));
+      return {
+        suggestions: ranked.suggestions.flatMap((s) => {
+          const p = byId.get(s.postId);
+          return p ? [{ ...s, caption: p.caption, ...(p.imageText ? { imageText: p.imageText } : {}) }] : [];
+        }),
+        savedPosts: saved.length,
+        profile: { facts: profile.facts.length, scannedPosts: profile.scannedPosts },
+      };
+    },
+    openHistoryPage: async () => {
+      await chrome.tabs.create({ url: chrome.runtime.getURL("history.html") });
+    },
     history: noHistory,
     // The Instagram panel's status pill: same wording as the popup's.
     backendStatus: async () => describeBackendStatus(await checkHealth()),
@@ -46,7 +65,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 function isForWorker(message: unknown): boolean {
   const kind = (message as { kind?: unknown } | null)?.kind;
-  return kind === "check-draft" || kind === "post-published" || kind === "get-backend-status" || kind === "save-to-history";
+  return kind === "check-draft" || kind === "post-published" || kind === "get-backend-status" || kind === "save-to-history" || kind === "get-history-suggestions" || kind === "open-history-page";
 }
 
 // ---------------------------------------------------------------------------
