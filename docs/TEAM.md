@@ -43,7 +43,7 @@ What each side can rely on (see the comments in `shared/contract.ts`):
 - `SuggestedEdit` with `replace` / `generalize` always has non-blank `replacement`; edits that break the rules arrive as `other` (advice only). The extension still re-checks with `extension/src/edits.ts` before applying.
 - `HealthResponse.databricks.state` is `"verified"` only after a real call succeeded. Settings alone give `"configured_unverified"`.
 
-### B. OCR → warning interface (owners 3 and 2) — **in code** (OCR module), popup wiring **not done yet**, milestone 2
+### B. OCR → warning interface (owners 3 and 2) — **in code** (OCR module), popup and Instagram wiring **not done yet**, milestone 2
 
 OCR runs inside the extension and produces ordinary `TextSource` objects, so the backend needs no change. Full details, integration steps and limitations: `extension/src/ocr/README.md`.
 
@@ -62,28 +62,36 @@ export function imageBoxesToPreview(boxes: OcrBox[], layout: PreviewLayout): Pre
 - **Failures throw `OcrError`** (`CANCELLED`, `NOT_AN_IMAGE`, `IMAGE_TOO_LARGE`, `ENGINE_LOAD_FAILED`, `RECOGNITION_FAILED`). A failure is never an empty "no text" result.
 - The OCR types live in `extension/src/ocr/types.ts`, **not** in `shared/contract.ts` as first proposed. They never cross the network or a Chrome message, and keeping boxes and image sizes out of the shared file means the backend can't start accepting them by accident. What crosses the network is the existing `TextSource`.
 - The popup shows the OCR text in the existing "Text in the photo" box for the user to correct, then sends it as `{ id: "image_text:<n>", type: "image_text", text }`.
-- Manifest V3 forbids remote code: the engine worker, WASM cores and English data are bundled into `dist/ocr/` by `extension/build.mjs`. Owner 2: please add `'wasm-unsafe-eval'` to the extension-page CSP in `manifest.json` (exact snippet in the OCR README).
+- Manifest V3 forbids remote code: the engine worker, WASM cores and English data are bundled into `dist/ocr/` by `extension/build.mjs`. The extension-page CSP with `'wasm-unsafe-eval'` is now in `manifest.json`.
+- **Instagram (owner 4):** the Instagram panel calls OCR through `OcrPort` in `extension/src/ports.ts`, which has the same shape as `readImageText()` and returns this `OcrResult`. The OCR worker can't start inside a content script, so connecting it means running OCR in an offscreen extension page and passing the photo there (never over the network). Until then Instagram uses the stand-in `unavailableOcr`, and the user types the photo's text.
 
-### C. Instagram page → extension (owners 4 and 2) — **proposed**, milestone 4
+### C. Instagram page → extension (owners 4 and 2) — **in code**, milestone 4
 
-The content script on instagram.com cannot call the backend directly (page CORS rules), so it sends Chrome messages to the service worker, which calls the backend using the same `api.ts` functions.
+The content script on instagram.com cannot call the backend directly (page CORS rules), so it sends Chrome messages to the service worker (`extension/src/background.ts`), which calls the backend using the same `api.ts` functions.
 
 ```ts
-// Proposed new types in shared/contract.ts
+// In code: shared/contract.ts
 export type ExtensionMessage =
-  | { kind: "draft-changed"; caption: string; imageCount: number }        // content script -> worker
-  | { kind: "check-draft"; sources: TextSource[]; draftHash: string }      // content script -> worker
-  | { kind: "check-result"; result: AnalyzeResponse }                      // worker -> content script
-  | { kind: "check-error"; message: string }                               // worker -> content script
-  | { kind: "post-published"; postId: string | null; publishedAt: string }; // content script -> worker
+  | { kind: "check-draft"; requestId: number; draftHash: string; sources: TextSource[] } // content script -> worker
+  | { kind: "post-published"; draftHash: string; postId: string | null; publishedAt: string } // content script -> worker, confirmed posts only
+  | { kind: "get-instagram-draft" };                                                     // popup -> content script
+
+export type CheckDraftReply =                                   // worker -> content script
+  | { kind: "check-result"; requestId: number; result: AnalyzeResponse }
+  | { kind: "check-error"; requestId: number; message: string };
+
+export interface InstagramDraftReply { kind: "instagram-draft"; found: boolean; caption: string; imageText: string } // content script -> popup
 ```
 
-- Reuse `hashSources()` and the stale-results logic; re-hash on every caption change.
-- Every Instagram assumption in `docs/ROADMAP.md` is **unverified**. Check each one on the live site before relying on it, and keep a "Check this post" button as a fallback if intercepting Share is unreliable.
+- `requestId` is echoed so the content script can ignore replies for older checks. The worker checks every message (`extension/src/messages.ts`): text only, our own content script on instagram.com only.
+- The proposed `draft-changed` message was not needed: the content script tracks changes itself (`extension/src/content/share-flow.ts`).
+- What was verified on the live site, and what wasn't, is listed in `docs/ROADMAP.md`. The "Check this post" button stays as the fallback.
 
 ### D. History (owners 1 and 4): backend **in code**, Databricks storage **requested**, extension UI **proposed**, milestone 3
 
-Only posts the user explicitly approved, and only published posts. All types are in `shared/contract.ts` (contract version 3).
+Only posts the user explicitly approved, and only published posts. All types are in `shared/contract.ts` (contract version 3). The backend stores them; the extension never holds Databricks credentials.
+
+Extension side so far: the service worker calls `HistoryClient.recordPublished({ draftHash, postId, publishedAt })` (`extension/src/ports.ts`) **only** after Instagram confirmed a publication. The stand-in `noHistory` stores nothing. Person C: replace it in `background.ts` with a client for the endpoints below, and ask the user before importing anything.
 
 ```
 POST   /api/history/import                        HistoryImportRequest -> HistoryImportResponse
@@ -103,12 +111,13 @@ POST   /api/analyze  { ..., historyPostIds: [...] } -> AnalyzeResponse with hist
 
 ### E. Warning interface (owner 2) — **in code**, consumed by everyone
 
-`extension/src/render.ts` → `renderResults(elements, result, sources, onApplyEdit)` draws any `AnalyzeResponse`. The Instagram overlay (C) should reuse it rather than draw warnings a second way. Rules: `textContent` only (never `innerHTML`), show the "Practice mode" banner for `mode: "mock"`, the incomplete banner for `droppedFindings > 0`, and the stale banner when the draft hash changes.
+`extension/src/render.ts` → `renderResults(elements, result, sources, onApplyEdit)` draws any `AnalyzeResponse`. The Instagram panel (`extension/src/content/overlay.ts`) reuses it, and popup.css, inside a Shadow DOM. Its methods are the `WarningPanel` interface in `extension/src/ports.ts`; owner 2 can replace the panel with their own by implementing that interface. Rules: `textContent` only (never `innerHTML`), show the "Practice mode" banner for `mode: "mock"`, the incomplete banner for `droppedFindings > 0`, and the stale banner when the draft hash changes.
 
 ## Not done yet (do not assume these work)
 
 - **Live Databricks analysis** passed with real credentials on 2026-11-14 (`npm run check:databricks` printed `Success. Connection verified.`). Re-run it after any app or credential change. Results go in `docs/TEST_RESULTS.md`.
 - **Databricks history storage** passed `npm run check:history` on 2026-11-14 (import, list, revoke). A live analysis with history (and saving its AI interpretations) also passed, and now takes about 8–9 s (interpretations are saved after the reply). Import and delete take about 10–12 s each. Set `HISTORY_STORE=databricks-app` to use it; the default `dev-memory` is temporary.
-- The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **the popup doesn't use it yet**.
-- Instagram integration and the extension's history screen are not implemented (only planned above).
+- The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **neither the popup nor the Instagram panel uses it yet**.
+- Instagram integration covers single-photo posts in English only. Blocking Share, letting a share through after "Continue", detecting "published", and staying out of the way for 2-photo posts are verified on the live site (2026-11-15, mock backend). Failure screens and video posts are **not**. See `docs/ROADMAP.md`.
+- The extension's history screen is not implemented, and the extension doesn't call the history API yet (`noHistory` stand-in in `ports.ts`).
 - The popup has only been checked through its code and automated tests, not by clicking through it in Chrome.

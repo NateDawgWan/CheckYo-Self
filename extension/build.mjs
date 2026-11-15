@@ -44,21 +44,33 @@ cpSync("src/ocr/demo/ocr-demo.html", "dist/ocr-demo.html");
 cpSync("src/ocr/demo/images", "dist/ocr-demo-images", { recursive: true }); // fictional samples
 // ------------------------------------------------------------------------------
 
-const options = {
-  // Output names: dist/popup.js and dist/ocr-demo.js
-  entryPoints: { popup: "src/popup.ts", "ocr-demo": "src/ocr/demo/demo.ts" },
+const common = {
   bundle: true,          // pulls in ../shared/contract.ts too
   outdir: "dist",
-  format: "esm",
   target: "chrome120",
   sourcemap: true,
   logLevel: "info",
+  loader: { ".css": "text" }, // `import css from "x.css"` gives the file as a string
 };
 
+const builds = [
+  // The popup, the service worker and the OCR demo page are ES modules.
+  // Output names: dist/popup.js, dist/background.js, dist/ocr-demo.js
+  {
+    ...common,
+    entryPoints: { popup: "src/popup.ts", background: "src/background.ts", "ocr-demo": "src/ocr/demo/demo.ts" },
+    format: "esm",
+  },
+  // Content scripts can't be ES modules, so the Instagram script is one plain file.
+  { ...common, entryPoints: { instagram: "src/content/main.ts" }, format: "iife" },
+];
+
 if (watch) {
-  const ctx = await esbuild.context(options);
-  await ctx.watch();
+  for (const options of builds) {
+    const ctx = await esbuild.context(options);
+    await ctx.watch();
+  }
   console.log("Watching src/ ... (edits to public/ need a restart)");
 } else {
-  await esbuild.build(options);
+  await Promise.all(builds.map((options) => esbuild.build(options)));
 }
