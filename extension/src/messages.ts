@@ -41,9 +41,13 @@ function parseSource(raw: unknown, i: number): Parsed<TextSource> {
   if (!SOURCE_TYPES.includes(type as SourceType) || !id.startsWith(type as string)) {
     return { ok: false, reason: `sources[${i}] has an unknown type.` };
   }
-  if (text.length > LIMITS.maxCharsPerSource) return { ok: false, reason: `sources[${i}] is too long.` };
+  // Plain words for the user, not "sources[1]".
+  const what = type === "caption" ? "The caption" : type === "image_text" ? "The photo text" : "An earlier post";
+  if (text.length > LIMITS.maxCharsPerSource) {
+    return { ok: false, reason: `${what} is too long to check (${text.length} characters; the limit is ${LIMITS.maxCharsPerSource}). Shorten it and try again.` };
+  }
   const problem = nonTextProblem(text);
-  if (problem) return { ok: false, reason: `sources[${i}] ${problem}. Only text can be checked.` };
+  if (problem) return { ok: false, reason: `${what} ${problem}. Only text can be checked.` };
   // Build a fresh object so extra fields (for example an image) are dropped.
   return { ok: true, value: { id, type: type as SourceType, text } };
 }

@@ -67,6 +67,7 @@ extension/src/ocr/            Local OCR: readImageText(), review step, quote->bo
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
 extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
 extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo
+extension/src/photo-text.ts   Photo-text rules: strict 1000-char limit, poor-quality/noise notices (tested)
 extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
 extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
 extension/src/ports.ts        Interfaces + stand-ins for OCR, the warning panel, history

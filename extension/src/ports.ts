@@ -54,6 +54,12 @@ export interface WarningPanelActions {
 
 export type MessageKind = "info" | "error";
 
+/** One notice about the photo read (see WarningPanel.setPhotoNotices). */
+export interface PhotoNotice {
+  kind: "poor" | "warning";
+  text: string;
+}
+
 export interface WarningPanel {
   /** The always-visible "Check this post" button next to the composer. */
   showLauncher(visible: boolean): void;
@@ -63,6 +69,12 @@ export interface WarningPanel {
   isOpen(): boolean;
   /** Fill the "Text in the photo" box (from OCR). `hint` explains where it came from. */
   setImageText(text: string, hint: string): void;
+  /**
+   * Notices about the photo read, shown above the "Text in the photo" box:
+   * "poor" = the OCR read is unreliable (low-quality photo); "warning" = some
+   * words unclear, or the text was cut to the size limit. [] clears them.
+   */
+  setPhotoNotices(notices: PhotoNotice[]): void;
   setBusy(busy: boolean): void;
   setMessage(text: string, kind?: MessageKind): void;
   showResult(result: AnalyzeResponse, sources: TextSource[]): void;

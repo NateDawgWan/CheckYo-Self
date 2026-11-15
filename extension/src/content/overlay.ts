@@ -9,7 +9,8 @@
 // It lives in a Shadow DOM so Instagram's styles can't change it and ours
 // can't change Instagram's page. It sits OUTSIDE Instagram's own dialog.
 import type { AnalyzeResponse, TextSource } from "../../../shared/contract";
-import type { MessageKind, WarningPanel, WarningPanelActions } from "../ports";
+import { PHOTO_TEXT_MAX_CHARS } from "../photo-text";
+import type { MessageKind, PhotoNotice, WarningPanel, WarningPanelActions } from "../ports";
 import { renderResults, type ResultElements } from "../render";
 // The popup's stylesheet, bundled as text by esbuild (see build.mjs).
 import popupCss from "../../public/popup.css";
@@ -35,6 +36,7 @@ const PANEL_CSS = `
 .intro { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .share-ready { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--low-mark); color: var(--low); font-weight: 600; }
 .actions { flex-wrap: wrap; }
+.photo-notices .banner { margin: 4px 0 6px; }
 `;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) {
@@ -83,9 +85,13 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const imageLabel = el("label", undefined, "Text in the photo");
   imageLabel.htmlFor = "sl-image-text";
   const imageHint = el("p", "hint");
+  // Notices about the photo read: poor quality, unclear words, text cut to the limit.
+  const photoNotices = el("div", "photo-notices");
+  photoNotices.setAttribute("role", "status");
   const imageText = el("textarea");
   imageText.id = "sl-image-text";
   imageText.rows = 4; // OCR text is often several lines
+  imageText.maxLength = PHOTO_TEXT_MAX_CHARS; // strict limit on photo text (src/photo-text.ts)
   imageText.placeholder = "e.g. a sign, name tag or jersey in the photo";
   imageText.addEventListener("input", () => actions.onImageTextInput(imageText.value));
 
@@ -126,7 +132,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
 
   const resultEls: ResultElements = { root: results, summary, markedDraft, findings, meta, mockBanner, incompleteBanner };
 
-  panel.append(head, intro, imageLabel, imageHint, imageText, consent, buttonRow, shareReady, message, results);
+  panel.append(head, intro, imageLabel, imageHint, photoNotices, imageText, consent, buttonRow, shareReady, message, results);
   shadow.append(style, launcher, panel);
   document.documentElement.append(host);
 
@@ -159,6 +165,12 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
     setImageText(text, hint) {
       imageText.value = text;
       imageHint.textContent = hint;
+    },
+    setPhotoNotices(notices: PhotoNotice[]) {
+      // textContent only: notices quote OCR words, which come from the photo.
+      photoNotices.replaceChildren(
+        ...notices.map((n) => el("p", n.kind === "poor" ? "banner banner-incomplete photo-poor" : "banner banner-stale photo-warning", n.text)),
+      );
     },
     setBusy(busy) {
       checkButton.disabled = busy;
