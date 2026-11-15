@@ -10,8 +10,12 @@
 //   <export folder>/your_instagram_activity/content/posts_1.json   (newer)
 //   <export folder>/content/posts_1.json                           (older)
 //   <export folder>/media/posts_1.json                             (seen 2026-11, photos in posts/)
-// Any posts_<N>.json in the chosen folder is read. (A "posts.json" in a
-// different, label-based format may sit next to it; it isn't read.)
+// Any posts_<N>.json in the chosen folder is read. Newer exports may have
+// (also, or only) a "posts.json" in a label-based format:
+//   [{ "timestamp": 1794748844, "label_values": [
+//        { "label": "Media", "media": [{ "uri": "media/posts/1.jpg", ... }] },
+//        { "label": "Caption", "value": "..." }, { "label": "Draft", "value": "False" }, ... ] }]
+// It describes the same posts, so it's only used when there's no posts_<N>.json.
 // posts_1.json is a list of posts:
 //   [{ "media": [{ "uri": "media/posts/202403/123.jpg", "creation_timestamp": 1710000000, "title": "caption" }],
 //      "title": "caption (posts with several photos)", "creation_timestamp": 1710000000 }]
@@ -34,12 +38,45 @@ export interface ExportPost {
 }
 
 const POSTS_FILE = /(^|\/)posts_\d+\.json$/i;
+const LABELLED_POSTS_FILE = /(^|\/)posts\.json$/i;
 const PHOTO = /\.(jpe?g|png|webp|gif|heic)$/i;
 const VIDEO = /\.(mp4|mov|m4v|webm)$/i;
 
-/** Which of the chosen files are post lists. Paths use "/" (as in File.webkitRelativePath). */
+/**
+ * Which of the chosen files are post lists: every posts_<N>.json, or if there
+ * are none, posts.json (newer label-based format). Paths use "/" (as in
+ * File.webkitRelativePath).
+ */
 export function findPostFiles(paths: string[]): string[] {
-  return paths.filter((p) => POSTS_FILE.test(p.replaceAll("\\", "/"))).sort();
+  const norm = paths.map((p) => p.replaceAll("\\", "/"));
+  const numbered = norm.filter((p) => POSTS_FILE.test(p));
+  return (numbered.length > 0 ? numbered : norm.filter((p) => LABELLED_POSTS_FILE.test(p))).sort();
+}
+
+/** The .json files among the chosen ones (to tell the user what was seen when no posts are found). */
+export function jsonFilesSeen(paths: string[]): string[] {
+  return paths.map((p) => p.replaceAll("\\", "/")).filter((p) => /\.json$/i.test(p)).sort();
+}
+
+/**
+ * Turns one entry of the label-based posts.json into the classic shape
+ * ({ media, title, creation_timestamp }), or null if it's a draft, not
+ * published, or has no media. Entries already in the classic shape are returned as they are.
+ */
+function normalizeEntry(entry: Record<string, unknown>): Record<string, unknown> | null {
+  if (!Array.isArray(entry.label_values)) return entry;
+  const labels = entry.label_values.filter(isObject);
+  const find = (name: string) => labels.find((l) => typeof l.label === "string" && l.label.toLowerCase() === name.toLowerCase());
+  const flag = (name: string) => String(find(name)?.value ?? "").trim().toLowerCase();
+  if (flag("Draft") === "true" || flag("Published") === "false") return null;
+  const media = find("Media")?.media;
+  if (!Array.isArray(media) || media.length === 0) return null;
+  const caption = find("Caption")?.value ?? find("Title")?.value;
+  return {
+    media,
+    title: typeof caption === "string" ? caption : "",
+    creation_timestamp: seconds(entry.timestamp) ?? seconds(find("Creation time")?.timestamp_value) ?? undefined,
+  };
 }
 
 /**
@@ -93,8 +130,9 @@ export function parsePostFiles(jsonTexts: string[]): { posts: ExportPost[]; skip
       : isObject(data)
         ? ((Object.values(data).find(Array.isArray) as unknown[] | undefined) ?? [])
         : [];
-    for (const entry of entries) {
-      if (!isObject(entry) || !Array.isArray(entry.media) || entry.media.length === 0) {
+    for (const rawEntry of entries) {
+      const entry = isObject(rawEntry) ? normalizeEntry(rawEntry) : null;
+      if (!entry || !Array.isArray(entry.media) || entry.media.length === 0) {
         skipped++;
         continue;
       }

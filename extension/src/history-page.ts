@@ -7,7 +7,7 @@
 import { HISTORY_LIMITS, type HistoryPost, type StoredHistoryPost } from "../../shared/contract";
 import { checkHealth, describeBackendStatus } from "./api";
 import { deleteAllHistory, deleteHistoryPost, getPortfolio, importHistory, listHistory, scanPortfolio } from "./history-api";
-import { findPostFiles, joinPhotoTexts, parsePostFiles, resolvePhotoPath, type ExportPost } from "./instagram-export";
+import { findPostFiles, joinPhotoTexts, jsonFilesSeen, parsePostFiles, resolvePhotoPath, type ExportPost } from "./instagram-export";
 import { OcrError, readImageText } from "./ocr";
 import { describePhotoRead } from "./photo-text";
 
@@ -195,17 +195,37 @@ function photoFile(uri: string): File | undefined {
   return path === undefined ? undefined : photoFiles.get(path);
 }
 
+/** Says exactly what was looked at, so a wrong folder is easy to spot. */
+function noPostsMessage(folder: string, paths: string[]): string {
+  const json = jsonFilesSeen(paths);
+  const seen = json.length
+    ? `The .json files in it are: ${json.slice(0, 8).join(", ")}${json.length > 8 ? ` and ${json.length - 8} more` : ""}.`
+    : "It has no .json files at all.";
+  return (
+    `No posts found in "${folder}" (${paths.length} file${paths.length === 1 ? "" : "s"} looked at). ${seen} ` +
+    "Pick the UNZIPPED export folder: the one that has posts_1.json or posts.json inside (usually in a media or content folder). " +
+    "If you picked a .zip, unzip it first (right-click → Extract All)."
+  );
+}
+
 async function readExportFolder(files: FileList) {
   const all = [...files];
   const byPath = new Map(all.map((f) => [f.webkitRelativePath.replaceAll("\\", "/"), f]));
-  const postFiles = findPostFiles([...byPath.keys()]);
+  const paths = [...byPath.keys()];
+  const folder = paths[0]?.split("/")[0] || "the chosen folder";
+  const postFiles = findPostFiles(paths);
   if (postFiles.length === 0) {
     picker.hidden = true;
-    setText(importStatus, "No posts found. Pick the UNZIPPED export folder: the one that contains posts_1.json (in a content or media folder, possibly inside your_instagram_activity).", "error");
+    setText(importStatus, noPostsMessage(folder, paths), "error");
     return;
   }
   const texts = await Promise.all(postFiles.map((p) => byPath.get(p)!.text()));
   const { posts, skipped } = parsePostFiles(texts);
+  if (posts.length === 0) {
+    picker.hidden = true;
+    setText(importStatus, `Read ${postFiles.join(", ")} in "${folder}", but found no published posts in it (${skipped} entries weren't posts, or were drafts).`, "error");
+    return;
+  }
   exportPosts = posts;
   photoFiles = new Map(all.map((f) => [withoutRoot(f.webkitRelativePath), f]));
   picked.clear();
