@@ -16,6 +16,7 @@ function response(draftHash = HASH): AnalyzeResponse {
   return {
     contractVersion: CONTRACT_VERSION, requestId: "r", draftHash, mode: "mock", model: null,
     promptVersion: null, analyzedAt: "2026-11-14T12:00:00Z", summary: "", findings: [], droppedFindings: 0,
+    historyUsed: [],
   };
 }
 

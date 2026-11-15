@@ -21,6 +21,7 @@ function result(summary = "ok"): AnalyzeResponse {
     summary,
     findings: [],
     droppedFindings: 0,
+    historyUsed: [],
   };
 }
 
