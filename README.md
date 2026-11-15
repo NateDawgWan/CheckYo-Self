@@ -39,6 +39,19 @@ After changing extension code, rebuild (or leave `npm run watch` running) and cl
 
 Tip: the popup closes when you click elsewhere. While developing, open it in a normal tab instead: `chrome-extension://<your-extension-id>/popup.html` (the ID is on its card in `chrome://extensions`). You can then right-click and Inspect it like any page.
 
+### Windows: keep the backend running without a terminal
+
+Double-click these files in `scripts\windows\` (needs Node.js and a filled-in `backend\.env`):
+
+| File | What it does |
+|---|---|
+| `install-autostart.cmd` | Starts the backend now, hidden, and again every time you sign in to Windows. It adds one shortcut to your own Startup folder (no admin rights). |
+| `uninstall-autostart.cmd` | Removes that shortcut and stops the backend. |
+| `start-backend.cmd` | Starts it once (does nothing if it's already running). Installs the packages on first run. |
+| `stop-backend.cmd` | Stops it until the next sign-in. |
+
+The backend's output goes to `backend\backend.log` (ids, statuses and counts only; it's never committed). It runs the code that is checked out in this folder: after `git pull` or switching branches, run `stop-backend.cmd` then `start-backend.cmd`. If you move the project folder, run `install-autostart.cmd` again. Port 8787 is then taken, so stop it before using `npm run dev`.
+
 ## Practice (mock) mode vs. real Databricks
 
 `ANALYSIS_MODE=mock` (the default) returns findings from simple keyword rules in `backend/src/mock.ts`. **These are not AI results.** The popup shows a "Practice mode" label and a purple banner whenever results are mocked.
