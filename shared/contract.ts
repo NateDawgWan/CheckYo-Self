@@ -10,7 +10,20 @@
 //   "1" milestone 1 import.
 //   "2" AnalyzeResponse.droppedFindings, HealthResponse.databricks,
 //       verified-evidence rule, validated suggested edits.
-export const CONTRACT_VERSION = "2" as const;
+//   "3" Approved history: AnalyzeRequest.includeHistory,
+//       AnalyzeResponse.historyUsed, /api/history routes,
+//       HealthResponse.history, USER_ID_HEADER.
+export const CONTRACT_VERSION = "3" as const;
+
+/**
+ * HTTP header carrying the extension's random user id (one per install).
+ * History is stored and looked up per user id. It is a pseudonymous label,
+ * NOT a password: the backend only listens on 127.0.0.1, so it separates
+ * users of one backend; it does not authenticate them.
+ * Format: 8-64 characters of A-Z a-z 0-9 _ -
+ */
+export const USER_ID_HEADER = "X-Second-Look-User";
+export const USER_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 /** Size limits. The backend rejects anything bigger. */
 export const LIMITS = {
@@ -52,7 +65,16 @@ export interface AnalyzeRequest {
    * still matches what's on screen (step 6: invalidate when the draft changes).
    */
   draftHash: string;
+  /**
+   * The DRAFT only: "caption" and "image_text" sources. "history" sources are
+   * added by the backend from approved, stored history (never sent here).
+   */
   sources: TextSource[];
+  /**
+   * true = also compare the draft with this user's approved earlier posts.
+   * Needs the USER_ID_HEADER. Default false.
+   */
+  includeHistory?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +174,19 @@ export interface AnalyzeResponse {
    * not present it as "nothing stood out".
    */
   droppedFindings: number;
+  /**
+   * Earlier posts the backend added to this analysis (empty if none).
+   * Evidence with sourceId "history:<postId>" refers to these.
+   */
+  historyUsed: Array<{ sourceId: string; postId: string; publishedAt: string }>;
 }
 
 export type ErrorCode =
   | "BAD_REQUEST"        // the extension sent something invalid
   | "FORBIDDEN"          // request came from an unexpected origin
   | "UPSTREAM_ERROR"     // Databricks returned an error
+  | "UPSTREAM_AUTH"      // Databricks rejected our credentials (bad/expired token, or a login redirect)
+  | "NOT_FOUND"          // e.g. that history post doesn't exist for this user
   | "UPSTREAM_TIMEOUT"   // Databricks took too long
   | "BAD_MODEL_OUTPUT"   // the LLM's answer wasn't valid JSON
   | "INTERNAL";
@@ -185,10 +214,91 @@ export interface DatabricksStatus {
   lastError: string | null;
 }
 
+/**
+ * Where approved history is kept.
+ *  - "dev-memory":     TEMPORARY development storage in the backend's memory.
+ *                      Lost on restart. Not Databricks.
+ *  - "databricks-app": stored by the Databricks App (unverified until tested).
+ */
+export type HistoryStoreKind = "dev-memory" | "databricks-app";
+
 // GET /api/health
 export interface HealthResponse {
   ok: true;
   mode: AnalysisMode;
   contractVersion: typeof CONTRACT_VERSION;
   databricks: DatabricksStatus;
+  history: { store: HistoryStoreKind };
+}
+
+// ---------------------------------------------------------------------------
+// History (milestone 3): only earlier posts the user explicitly approved.
+// Every /api/history request needs the USER_ID_HEADER; users never see each
+// other's history.
+//
+//   POST   /api/history/import                       HistoryImportRequest -> HistoryImportResponse
+//   GET    /api/history                              -> HistoryListResponse
+//   DELETE /api/history/posts/:postId                -> HistoryDeleteResponse
+//   POST   /api/history/approvals/:approvalId/revoke -> HistoryDeleteResponse
+//   DELETE /api/history                              -> HistoryDeleteResponse  ("delete all my history")
+// ---------------------------------------------------------------------------
+
+export const HISTORY_LIMITS = {
+  maxPostsPerImport: 50,
+  maxPostsPerUser: 500,
+  maxCharsPerPost: 5000,
+  /** At most this many earlier posts are added to one analysis. */
+  maxPostsPerAnalysis: 8,
+} as const;
+
+/**
+ * OBSERVED data: one earlier post, as the user approved it.
+ * Only PUBLISHED posts can be imported; drafts are never stored as history.
+ */
+export interface HistoryPost {
+  /** Becomes the TextSource id "history:<postId>". Format: A-Z a-z 0-9 _ . - (1-80). */
+  postId: string;
+  status: "published";
+  /** ISO 8601 date the post was published. */
+  publishedAt: string;
+  caption: string;
+  /** Text read from the post's image (OCR). Never the image itself. */
+  imageText?: string;
+}
+
+export interface HistoryImportRequest {
+  contractVersion: typeof CONTRACT_VERSION;
+  /**
+   * The user's explicit approval. `approved` must be true and `postIds`
+   * must list exactly the posts being imported.
+   */
+  approval: { approved: true; postIds: string[] };
+  posts: HistoryPost[];
+}
+
+export interface HistoryImportResponse {
+  contractVersion: typeof CONTRACT_VERSION;
+  /** Use this to revoke the approval (deletes these posts and anything derived from them). */
+  approvalId: string;
+  imported: number;
+  store: HistoryStoreKind;
+}
+
+export interface StoredHistoryPost extends HistoryPost {
+  approvalId: string;
+  importedAt: string;
+}
+
+export interface HistoryListResponse {
+  contractVersion: typeof CONTRACT_VERSION;
+  store: HistoryStoreKind;
+  posts: StoredHistoryPost[];
+}
+
+export interface HistoryDeleteResponse {
+  contractVersion: typeof CONTRACT_VERSION;
+  /** Observed posts deleted. */
+  deletedPosts: number;
+  /** AI interpretations deleted along with them. */
+  deletedInterpretations: number;
 }

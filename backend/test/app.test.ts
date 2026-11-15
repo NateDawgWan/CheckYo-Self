@@ -1,0 +1,257 @@
+// End-to-end tests of the backend's HTTP routes (app.ts), with fake parts:
+// a fake analyzer instead of Databricks, and the in-memory history store.
+// Covers: history isolation between users, approvals, drafts vs. published
+// posts, deletion/revocation, history in analysis, and "never fall back to
+// mock results after a live failure".
+// Run with: npm test   (in the backend folder)
+import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
+import { after, before, beforeEach, test } from "node:test";
+import { CONTRACT_VERSION, USER_ID_HEADER, type TextSource } from "../../shared/contract";
+import { createApp, type AppDeps } from "../src/app";
+import { AppError } from "../src/errors";
+import { DevMemoryHistoryStore } from "../src/history/memoryStore";
+import { parseModelOutput } from "../src/parse";
+
+const ALICE = "alice_user_0001";
+const BOB = "bob_user_000002";
+const HASH = "a".repeat(64);
+
+// --- A test server whose analyzer we can swap per test ---------------------------
+
+let analyzer: AppDeps["analyze"];
+let lastSources: TextSource[] = [];
+let store: DevMemoryHistoryStore;
+let baseUrl = "";
+let server: ReturnType<ReturnType<typeof createApp>["listen"]>;
+
+before(async () => {
+  store = new DevMemoryHistoryStore();
+  const app = createApp({
+    mode: "databricks",
+    model: "gpt-oss-120b",
+    promptVersion: "test",
+    analyze: (sources) => {
+      lastSources = sources;
+      return analyzer(sources);
+    },
+    get historyStore() {
+      return store;
+    },
+    getDatabricksStatus: () => ({ state: "configured_unverified", lastCallAt: null, lastError: null }),
+  } as AppDeps);
+  await new Promise<void>((resolve) => {
+    server = app.listen(0, "127.0.0.1", resolve);
+  });
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+after(() => {
+  server.close();
+});
+
+beforeEach(() => {
+  store = new DevMemoryHistoryStore();
+  lastSources = [];
+  analyzer = async () => ({ summary: "ok", findings: [], droppedFindings: 0 });
+});
+
+async function call(method: string, path: string, user: string | null, body?: unknown) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (user) headers[USER_ID_HEADER] = user;
+  const res = await fetch(`${baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: res.status, body: (await res.json()) as any };
+}
+
+function post(postId: string, caption: string, publishedAt = "2026-10-01T12:00:00Z") {
+  return { postId, status: "published", publishedAt, caption };
+}
+
+function importBody(posts: any[], approvedIds = posts.map((p) => p.postId)) {
+  return { contractVersion: CONTRACT_VERSION, approval: { approved: true, postIds: approvedIds }, posts };
+}
+
+function analyzeBody(caption: string, includeHistory = false) {
+  return {
+    contractVersion: CONTRACT_VERSION,
+    draftHash: HASH,
+    sources: [{ id: "caption", type: "caption", text: caption }],
+    ...(includeHistory ? { includeHistory: true } : {}),
+  };
+}
+
+// --- Approval and drafts ------------------------------------------------------------
+
+test("imports only explicitly approved, published posts", async () => {
+  const ok = await call("POST", "/api/history/import", ALICE, importBody([post("p1", "Soccer at Riverside field")]));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.imported, 1);
+  assert.equal(ok.body.store, "dev-memory");
+  assert.match(ok.body.approvalId, /^[a-f0-9-]{36}$/);
+
+  const notApproved = importBody([post("p2", "x")]);
+  (notApproved.approval as any).approved = false;
+  assert.equal((await call("POST", "/api/history/import", ALICE, notApproved)).status, 400);
+
+  const mismatch = importBody([post("p3", "x"), post("p4", "y")], ["p3"]);
+  assert.equal((await call("POST", "/api/history/import", ALICE, mismatch)).status, 400);
+
+  const draft = importBody([{ ...post("p5", "x"), status: "draft" }]);
+  const draftRes = await call("POST", "/api/history/import", ALICE, draft);
+  assert.equal(draftRes.status, 400);
+  assert.match(draftRes.body.error.message, /Drafts are never stored/);
+
+  assert.deepEqual(
+    (await call("GET", "/api/history", ALICE)).body.posts.map((p: any) => p.postId),
+    ["p1"],
+  );
+});
+
+test("history routes require a valid user id", async () => {
+  assert.equal((await call("GET", "/api/history", null)).status, 400);
+  assert.equal((await call("GET", "/api/history", "short")).status, 400);
+  assert.equal((await call("POST", "/api/history/import", null, importBody([post("p1", "x")]))).status, 400);
+});
+
+test("history sources cannot be sent with a draft", async () => {
+  const body = analyzeBody("hello");
+  (body.sources as any[]).push({ id: "history:p1", type: "history", text: "sneaky", date: "2026-01-01" });
+  const res = await call("POST", "/api/analyze", ALICE, body);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error.message, /history can't be sent with a draft/);
+});
+
+// --- Isolation -------------------------------------------------------------------------
+
+test("one user can never see, use or delete another user's history", async () => {
+  const a = await call("POST", "/api/history/import", ALICE, importBody([post("shared-id", "Alice at Maple Street")]));
+  await call("POST", "/api/history/import", BOB, importBody([post("bob-1", "Bob at the lake")]));
+
+  // Listing
+  assert.deepEqual((await call("GET", "/api/history", BOB)).body.posts.map((p: any) => p.postId), ["bob-1"]);
+
+  // Analysis: Bob's request must not pull in Alice's post
+  await call("POST", "/api/analyze", BOB, analyzeBody("Maple Street again", true));
+  assert.deepEqual(lastSources.map((s) => s.id), ["caption", "history:bob-1"]);
+
+  // Deleting / revoking with Alice's ids as Bob does nothing to Alice
+  assert.equal((await call("DELETE", "/api/history/posts/shared-id", BOB)).status, 404);
+  assert.equal((await call("POST", `/api/history/approvals/${a.body.approvalId}/revoke`, BOB)).status, 404);
+  await call("DELETE", "/api/history", BOB);
+  assert.equal((await call("GET", "/api/history", ALICE)).body.posts.length, 1);
+});
+
+// --- Deletion and revocation ----------------------------------------------------------
+
+test("revoking an approval deletes its posts and the AI interpretations derived from them", async () => {
+  const first = await call("POST", "/api/history/import", ALICE, importBody([post("p1", "Lincoln Elementary pickup")]));
+  await call("POST", "/api/history/import", ALICE, importBody([post("p2", "Beach day")]));
+
+  // An AI finding that relies on a verified quote from p1 gets stored separately.
+  analyzer = async (sources) =>
+    parseModelOutput(
+      JSON.stringify({
+        summary: "s",
+        findings: [
+          {
+            category: "children",
+            severity: "high",
+            exposure: "Shows a school pickup routine.",
+            evidence: [
+              { sourceId: "caption", quote: "pickup" },
+              { sourceId: "history:p1", quote: "Lincoln Elementary" },
+            ],
+            confidence: "medium",
+            uncertainty: "",
+            suggestedEdits: [],
+          },
+        ],
+      }),
+      sources,
+    );
+  const analysis = await call("POST", "/api/analyze", ALICE, analyzeBody("Same pickup at Lincoln Elementary", true));
+  assert.equal(analysis.status, 200);
+  assert.equal(analysis.body.findings[0].crossSource, true);
+  assert.ok(analysis.body.historyUsed.some((h: any) => h.postId === "p1"));
+
+  const interpretations = await store.listInterpretations(ALICE);
+  assert.equal(interpretations.length, 1);
+  assert.deepEqual(interpretations[0].postIds, ["p1"]);
+  // Observed posts are untouched by saving interpretations.
+  assert.equal((await store.listPosts(ALICE)).length, 2);
+
+  const revoked = await call("POST", `/api/history/approvals/${first.body.approvalId}/revoke`, ALICE);
+  assert.deepEqual(
+    { posts: revoked.body.deletedPosts, interpretations: revoked.body.deletedInterpretations },
+    { posts: 1, interpretations: 1 },
+  );
+  assert.deepEqual((await call("GET", "/api/history", ALICE)).body.posts.map((p: any) => p.postId), ["p2"]);
+});
+
+test("deleting one post, then everything", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([post("p1", "a"), post("p2", "b")]));
+  assert.equal((await call("DELETE", "/api/history/posts/p1", ALICE)).body.deletedPosts, 1);
+  assert.equal((await call("DELETE", "/api/history/posts/p1", ALICE)).status, 404);
+  assert.equal((await call("DELETE", "/api/history", ALICE)).body.deletedPosts, 1);
+  assert.equal((await call("GET", "/api/history", ALICE)).body.posts.length, 0);
+});
+
+// --- History in analysis -------------------------------------------------------------
+
+test("analysis includes relevant approved history with ids and dates only when asked", async () => {
+  await call("POST", "/api/history/import", ALICE, importBody([
+    post("old-beach", "Beach day", "2025-06-01T10:00:00Z"),
+    post("soccer", "Riverside soccer practice", "2026-09-01T10:00:00Z"),
+  ]));
+
+  await call("POST", "/api/analyze", ALICE, analyzeBody("Riverside soccer again"));
+  assert.deepEqual(lastSources.map((s) => s.id), ["caption"], "no history unless includeHistory");
+
+  const res = await call("POST", "/api/analyze", ALICE, analyzeBody("Riverside soccer again", true));
+  assert.equal(lastSources[1].id, "history:soccer", "the post sharing words comes first");
+  assert.equal(lastSources[1].type, "history");
+  assert.equal(lastSources[1].date, "2026-09-01T10:00:00.000Z");
+  assert.deepEqual(res.body.historyUsed[0], { sourceId: "history:soccer", postId: "soccer", publishedAt: "2026-09-01T10:00:00.000Z" });
+});
+
+test("includeHistory without a user id is refused", async () => {
+  assert.equal((await call("POST", "/api/analyze", null, analyzeBody("hi", true))).status, 400);
+});
+
+// --- Live failures are errors, never mock results ------------------------------------
+
+test("a failed Databricks call returns an error, not substitute findings", async () => {
+  analyzer = async () => {
+    throw new AppError("UPSTREAM_AUTH", 502, "Databricks redirected to its browser login (HTTP 302).");
+  };
+  const res = await call("POST", "/api/analyze", ALICE, analyzeBody("Picking up Emma at Lincoln Elementary"));
+  assert.equal(res.status, 502);
+  assert.equal(res.body.error.code, "UPSTREAM_AUTH");
+  assert.equal(res.body.findings, undefined, "no findings of any kind on failure");
+});
+
+test("invalid model output is an error; unsupported evidence is dropped and reported", async () => {
+  analyzer = async (sources) => parseModelOutput(JSON.stringify({ summary: "fine" }), sources);
+  const bad = await call("POST", "/api/analyze", ALICE, analyzeBody("hello"));
+  assert.equal(bad.status, 502);
+  assert.equal(bad.body.error.code, "BAD_MODEL_OUTPUT");
+
+  analyzer = async (sources) =>
+    parseModelOutput(
+      JSON.stringify({
+        summary: "s",
+        findings: [{ category: "location", severity: "high", exposure: "x", evidence: [{ sourceId: "caption", quote: "123 Fake St" }] }],
+      }),
+      sources,
+    );
+  const unsupported = await call("POST", "/api/analyze", ALICE, analyzeBody("hello there"));
+  assert.equal(unsupported.status, 200);
+  assert.equal(unsupported.body.findings.length, 0);
+  assert.equal(unsupported.body.droppedFindings, 1);
+});
+
+test("health reports the history store and contract version", async () => {
+  const res = await call("GET", "/api/health", null);
+  assert.equal(res.body.contractVersion, CONTRACT_VERSION);
+  assert.deepEqual(res.body.history, { store: "dev-memory" });
+});
