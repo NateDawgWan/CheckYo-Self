@@ -24,7 +24,7 @@ import { applyEditToText } from "../edits";
 import { describePhotoRead, PHOTO_TEXT_MAX_CHARS } from "../photo-text";
 import type { OcrPort, WarningPanel, WarningPanelActions } from "../ports";
 import { offscreenOcr } from "./offscreen-ocr";
-import { PhotoSet } from "./photo-set";
+import { carouselProgress, PhotoSet } from "./photo-set";
 import {
   detectPublishOutcome,
   readComposer,
@@ -69,6 +69,7 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   // read when another photo from the same tab arrives.
   const readQueue: { key: string; blob: Promise<Blob | null>; generation: number }[] = [];
   let queueRunning = false;
+  let reachedLastSlide = false; // the carousel's last photo was shown (no "next" arrow)
   let sharedDraftHash: Promise<string> | null = null; // hash of the draft that was shared
 
   // -------------------------------------------------------------------------
@@ -108,7 +109,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
         photos.reset();
         photoGeneration++; // ignore reads still running for the closed post
         readQueue.length = 0;
-        panel?.setPhotos([], "");
+        reachedLastSlide = false;
+        panel?.setPhotos([], { text: "", done: false });
+        panel?.setLauncherPrompt(null);
         panel?.clearResult();
         panel?.setStale(false);
       }
@@ -126,10 +129,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       const image = snapshot.images.find((i) => i.key === entry.key)!;
       readQueue.push({ key: entry.key, blob: readImageBlob(image), generation: photoGeneration });
     }
-    if (added.length) {
-      renderPhotos();
-      void runReadQueue();
-    }
+    if (snapshot.carousel.hasPrev && !snapshot.carousel.hasNext) reachedLastSlide = true;
+    if (added.length) void runReadQueue();
+    renderPhotos(); // also updates the carousel prompt (e.g. the last photo was reached)
 
     draftChanged();
   }
@@ -157,12 +159,14 @@ export function startInstagramIntegration(options: IntegrationOptions) {
   function renderPhotos() {
     const all = photos.all();
     const many = all.length > 1 || snapshot.postType === "multi-photo";
-    const note = many
-      ? `${all.length} photo${all.length === 1 ? "" : "s"} found so far. If your post has more, use Instagram's arrows to show each photo; each new one is read automatically.`
-      : "";
-    getPanel().setPhotos(
-      all.map((p) => ({ index: p.index, label: many ? `Text in photo ${p.index}` : "Text in the photo", text: p.text, hint: p.hint, notices: p.notices })),
-      note,
+    const p = getPanel();
+    // A carousel: prompt the user (on the corner button AND in the panel) to
+    // click through every photo, until the last one has been shown and read.
+    const progress = many ? carouselProgress(all.length, reachedLastSlide, photos.isReading()) : null;
+    p.setLauncherPrompt(progress?.launcher ?? null);
+    p.setPhotos(
+      all.map((ph) => ({ index: ph.index, label: many ? `Text in photo ${ph.index}` : "Text in the photo", text: ph.text, hint: ph.hint, notices: ph.notices })),
+      { text: progress?.banner ?? "", done: progress?.complete ?? false },
     );
   }
 
@@ -300,6 +304,11 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       p.setMessage(`The text of photo ${tooLong.index} is longer than ${PHOTO_TEXT_MAX_CHARS} characters. Shorten it before checking.`, "error");
       return;
     }
+    // A carousel whose last photo wasn't shown yet: check anyway, but say so.
+    const unseenWarning =
+      snapshot.postType === "multi-photo" && !reachedLastSlide
+        ? ` Not all photos were shown: only the ${photos.all().length} you clicked to were checked. Click › to show the rest, then check again.`
+        : "";
     const sources = currentSources();
     if (!sources.some((s) => s.text.trim())) {
       p.setMessage("Write a caption (or type the photo's text) first.", "error");
@@ -330,7 +339,9 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       p.showResult(reply.result, sources);
       const n = reply.result.findings.length;
       if (reply.result.droppedFindings > 0) {
-        p.setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${reply.result.droppedFindings} not shown.`, "error");
+        p.setMessage(`Check incomplete: ${n} thing${n === 1 ? "" : "s"} shown, ${reply.result.droppedFindings} not shown.${unseenWarning}`, "error");
+      } else if (unseenWarning) {
+        p.setMessage(`Check incomplete:${unseenWarning}`, "error");
       } else {
         p.setMessage(n === 0 ? "Check complete." : `Check complete: ${n} thing${n === 1 ? "" : "s"} to review.`);
       }

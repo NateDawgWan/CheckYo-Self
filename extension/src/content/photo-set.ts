@@ -111,3 +111,34 @@ export class PhotoSet {
     return withText.map((p) => `Photo ${p.index}: ${p.text}`).join("\n\n");
   }
 }
+
+/** What the corner button and the panel say about a carousel's photos. */
+export interface CarouselProgress {
+  /** The user reached the last photo and every photo has been read. */
+  complete: boolean;
+  /** Text for the corner button (shown before the panel is opened). */
+  launcher: string;
+  /** Banner at the top of the panel's photo section. */
+  banner: string;
+}
+
+/**
+ * `read`: photos found so far; `reachedLast`: the last photo was shown (no
+ * "next" arrow); `reading`: some photo is still being read.
+ */
+export function carouselProgress(read: number, reachedLast: boolean, reading: boolean): CarouselProgress {
+  const photos = `${read} photo${read === 1 ? "" : "s"}`;
+  if (reachedLast && !reading) {
+    return {
+      complete: true,
+      launcher: `CheckYo'Self: all ${photos} read. Check this post`,
+      banner: `All ${photos} read ✓ Review each one's text below, then check.`,
+    };
+  }
+  return {
+    complete: false,
+    launcher: `CheckYo'Self: click › to show each photo (${read} read)`,
+    banner:
+      `This post has several photos. Click the › arrow on the photo to show each one: CheckYo'Self reads every photo as it appears (${photos} ${reading ? "found, reading…" : "read so far"}).`,
+  };
+}

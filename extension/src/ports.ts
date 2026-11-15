@@ -83,7 +83,9 @@ export interface WarningPanel {
    * the boxes (for carousels: "use Instagram's arrows…"). [] clears them.
    * A box the user is typing in is never overwritten.
    */
-  setPhotos(photos: PhotoView[], note: string): void;
+  setPhotos(photos: PhotoView[], note: { text: string; done: boolean }): void;
+  /** What the corner button says before the panel is opened (null: the default). */
+  setLauncherPrompt(text: string | null): void;
   /** The Databricks/backend status pill in the panel's header (same states as the popup's pill). */
   setBackendStatus(status: Omit<BackendStatusReply, "kind">): void;
   setBusy(busy: boolean): void;
