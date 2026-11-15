@@ -15,13 +15,14 @@ A Chrome extension that shows what an Instagram post could reveal about you befo
 ```bash
 # 1. Backend
 cd backend
-npm install
-cp .env.example .env        # Windows (PowerShell): copy .env.example .env
+npm ci
+cp -n .env.example .env     # -n: never overwrite an existing .env
+                            # Windows PowerShell: if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 npm run dev                 # starts http://127.0.0.1:8787 and restarts on save
 
 # 2. Extension (in a second terminal)
 cd extension
-npm install
+npm ci
 npm run build               # or: npm run watch
 ```
 
@@ -51,8 +52,10 @@ To turn on real analysis:
    DATABRICKS_TOKEN=<your token>
    DATABRICKS_SERVING_ENDPOINT=<endpoint name>
    ```
-4. Test the connection: `npm run check:databricks` (in `backend/`). It should print `Success.`
-5. Restart `npm run dev`. The popup's label changes to "Databricks connected".
+4. Test the connection: `npm run check:databricks` (in `backend/`). It should print `Success. Connection verified.`
+5. Restart `npm run dev`. The popup's label shows **"Databricks not tested yet"** until the first check succeeds, then **"Databricks connected"**. If a call fails it shows **"Databricks error"** (hover for the reason). Filled-in settings alone are never shown as connected.
+
+**Status:** the Databricks code has not yet been tested against a real workspace. Until someone completes step 4 successfully, treat it as unverified.
 
 If `check:databricks` fails: HTTP 401/403 means a bad or expired token; 404 means the host or endpoint name is wrong.
 
@@ -80,11 +83,13 @@ The backend logs request IDs and counts, not post text.
 |---|---|---|
 | backend | `npm run dev` | Run the server, restart on save |
 | backend | `npm run typecheck` | Check types without running |
+| backend | `npm test` | Run the regression tests |
 | backend | `npm run check:databricks` | Test Databricks credentials |
 | extension | `npm run build` | Build into `extension/dist` |
 | extension | `npm run watch` | Rebuild on save |
-| extension | `npm run typecheck` | Check types |
+| extension | `npm run typecheck` | Check types (source and tests) |
+| extension | `npm test` | Run the regression tests |
 
 ## Project layout
 
-See [CLAUDE.md](CLAUDE.md) for the architecture and file-by-file overview.
+See [CLAUDE.md](CLAUDE.md) for the architecture and file-by-file overview, and [docs/TEAM.md](docs/TEAM.md) for who owns which part and how the parts connect.

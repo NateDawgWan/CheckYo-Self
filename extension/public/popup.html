@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Second Look</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>Second Look</h1>
+      <span id="backend-status" class="status-pill" data-state="checking">Checking backend…</span>
+    </header>
+
+    <main>
+      <section class="draft" aria-labelledby="draft-heading">
+        <h2 id="draft-heading" class="visually-hidden">Your draft</h2>
+
+        <label for="caption">Caption</label>
+        <textarea id="caption" rows="5" placeholder="Write or paste a caption"></textarea>
+
+        <label for="image-text">Text in the photo</label>
+        <p class="hint">Type it by hand for now. Milestone 2 reads it from the photo automatically, on your computer.</p>
+        <textarea id="image-text" rows="2" placeholder="e.g. a sign, name tag or jersey in the photo"></textarea>
+
+        <div class="actions">
+          <button id="load-sample" type="button" class="secondary">Use sample post</button>
+          <button id="analyze" type="button" class="primary">Check this post</button>
+        </div>
+        <p id="message" class="message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="results" class="results" hidden aria-labelledby="results-heading">
+        <h2 id="results-heading">What this post could reveal</h2>
+
+        <p id="mock-banner" class="banner banner-mock" hidden>
+          Practice results. These come from simple keyword rules, not AI. See the README to connect Databricks.
+        </p>
+        <p id="incomplete-banner" class="banner banner-incomplete" role="alert" hidden></p>
+        <div id="stale-banner" class="banner banner-stale" hidden>
+          <span>You changed the draft after this check, so these results may be wrong.</span>
+          <button id="reanalyze" type="button" class="primary small">Check again</button>
+        </div>
+
+        <p id="summary" class="summary"></p>
+
+        <div id="marked-draft" class="marked-draft"></div>
+        <ol id="findings" class="findings"></ol>
+        <p id="meta" class="meta"></p>
+      </section>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
