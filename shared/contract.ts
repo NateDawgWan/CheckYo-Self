@@ -199,15 +199,8 @@ export interface HealthResponse {
 // response above are unchanged, so CONTRACT_VERSION stays the same.
 // ---------------------------------------------------------------------------
 
-/**
- * OCR -> warning interface (docs/TEAM.md section B).
- * Text read from one image ON THE USER'S COMPUTER. The image is never uploaded.
- */
-export interface OcrResult {
-  sourceId: string;   // "image_text:<index>"
-  text: string;       // the user can edit this before checking
-  confidence: number; // 0-100 from the OCR engine, shown as a hint
-}
+// (OCR types are NOT here: they never cross the network or a Chrome message.
+// They live in extension/src/ocr/types.ts. See docs/TEAM.md section B.)
 
 /**
  * Chrome messages between the Instagram content script, the service worker

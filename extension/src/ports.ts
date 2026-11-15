@@ -8,24 +8,32 @@
 //
 // To plug in a real module, pass it to startInstagramIntegration() in
 // content/main.ts (OCR, panel) or to the worker in background.ts (history).
-import type { AnalyzeResponse, OcrResult, SuggestedEdit, TextSource } from "../../shared/contract";
+import type { AnalyzeResponse, SuggestedEdit, TextSource } from "../../shared/contract";
+import type { OcrResult } from "./ocr";
 
 // ---------------------------------------------------------------------------
 // OCR (docs/TEAM.md section B)
 // ---------------------------------------------------------------------------
 
+/**
+ * Same shape as Person B's readImageText() in src/ocr/. On instagram.com it
+ * can't be called directly (the OCR worker can't start inside a content
+ * script, see src/ocr/README.md), so a real OcrPort for Instagram will pass
+ * the photo to an extension page (an offscreen document) that runs OCR there.
+ * That is not built yet, so Instagram uses `unavailableOcr`.
+ */
 export interface OcrPort {
-  /** false while OCR is not built yet; the panel then asks the user to type photo text. */
+  /** false while OCR can't run here; the panel then asks the user to type photo text. */
   readonly available: boolean;
-  /** Reads text from one image ON THIS COMPUTER. Must never upload the image. */
+  /** Reads text from one image ON THIS COMPUTER. Must never upload the image. Throws OcrError on failure. */
   readImageText(image: Blob, index: number): Promise<OcrResult>;
 }
 
-/** Stand-in until Person B's OCR exists: finds no text, and says so. */
+/** Stand-in until OCR can run for Instagram: never called (available is false). */
 export const unavailableOcr: OcrPort = {
   available: false,
-  async readImageText(_image: Blob, index: number): Promise<OcrResult> {
-    return { sourceId: `image_text:${index}`, text: "", confidence: 0 };
+  async readImageText(): Promise<OcrResult> {
+    throw new Error("OCR is not available on Instagram yet.");
   },
 };
 

@@ -36,7 +36,7 @@ Supported workflow: **one single-photo post made in the "Create" dialog on deskt
 - Backend calls go content script → service worker (`chrome.runtime.sendMessage`) → `api.ts` → local backend. Only text is sent; the worker re-checks this.
 - Any change to the caption, the photo text, or the selected photo makes results stale. Replies for older requests or changed drafts are ignored. "Apply" only runs if the caption still matches the checked text.
 - Only a share Instagram *confirms* counts as published and is passed to history (currently a stand-in that stores nothing). Closed-without-confirmation is "unknown", never "published".
-- OCR uses a stand-in until milestone 2 lands; the user can type the photo's text in the panel.
+- OCR: the OCR module (`extension/src/ocr/`) can't start inside a content script, so the panel uses a stand-in and the user types the photo's text. **Next step:** run OCR in an offscreen extension page (`offscreen` permission), send it the photo read from the page's `blob:` image (inside the browser only), and plug it in through `OcrPort` (`extension/src/ports.ts`).
 - **Only single-photo posts on an English page get any help.** For multi-photo, video or unrecognised posts, and for pages in other languages, the extension does nothing at all: no button, Share is never paused. The manual popup still works for any text.
 - If interception stops working (for example after Instagram changes its page), use the "Check this post" button, or the popup's **Use Instagram draft** button, which copies the caption into the popup.
 

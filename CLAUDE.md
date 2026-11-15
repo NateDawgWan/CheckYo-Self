@@ -8,8 +8,9 @@ Guide for AI coding assistants (and teammates) working in this repo. The team ar
 - Mock mode is tested: typechecks, extension build, `npm test` regression tests in both packages, and manual `curl` checks of `/api/health` and `/api/analyze`.
 - Databricks integration is written and unit-tested with a fake `fetch`, but has **not** passed a live credentialed test. Treat it as unverified until `npm run check:databricks` prints `Success. Connection verified.` against a real workspace. "Configured" (settings filled in) is not "verified".
 - Team ownership and the interfaces between areas are in `docs/TEAM.md`.
+- Milestone 2 (in progress): local OCR module in `extension/src/ocr/` (Tesseract.js, bundled; unit tests, `npm run check:ocr`, and a local test page). Not yet wired into the popup or the Instagram panel, and not yet run inside the loaded extension.
 - Milestone 4 (Instagram, single-photo posts, English UI) is in code: content script in `extension/src/content/`, service worker in `extension/src/background.ts`. Blocking Share, the panel, stale detection and "Apply" were checked by hand on the live site; letting a share through and detecting "published" were NOT (they need a real post). Details in `docs/ROADMAP.md`.
-- Automatic image OCR, historical storage, and cross-post reasoning are future milestones. Their interfaces exist in `extension/src/ports.ts` with stand-ins (`unavailableOcr`, `noHistory`).
+- Historical storage and cross-post reasoning are future milestones. The Instagram code calls them through `extension/src/ports.ts` with stand-ins (`unavailableOcr`, `noHistory`).
 - Implement only the milestone assigned in the current task.
 - Preserve the existing working structure; do not reorganize it without a concrete need.
 
@@ -53,6 +54,7 @@ extension/src/popup.ts        Popup wiring, draft hashing, stale detection, appl
 extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
+extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend
 extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
 extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
@@ -85,6 +87,7 @@ cd extension && npm run watch
 # Checks (run all of these before committing)
 cd backend && npm run typecheck && npm test
 cd extension && npm run typecheck && npm test && npm run build
+cd extension && npm run check:ocr           # real OCR engine on the fictional demo images
 
 # Databricks (only with real credentials in backend/.env)
 cd backend && npm run check:databricks    # must print "Success. Connection verified."

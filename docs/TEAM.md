@@ -41,29 +41,27 @@ What each side can rely on (see the comments in `shared/contract.ts`):
 - `SuggestedEdit` with `replace` / `generalize` always has non-blank `replacement`; edits that break the rules arrive as `other` (advice only). The extension still re-checks with `extension/src/edits.ts` before applying.
 - `HealthResponse.databricks.state` is `"verified"` only after a real call succeeded. Settings alone give `"configured_unverified"`.
 
-### B. OCR → warning interface (owners 3 and 2) — **interface in code**, OCR itself milestone 2
+### B. OCR → warning interface (owners 3 and 2) — **in code** (OCR module), popup and Instagram wiring **not done yet**, milestone 2
 
-OCR runs inside the extension and produces ordinary `TextSource` objects, so the backend needs no change.
+OCR runs inside the extension and produces ordinary `TextSource` objects, so the backend needs no change. Full details, integration steps and limitations: `extension/src/ocr/README.md`.
 
 ```ts
-// In code: shared/contract.ts
-export interface OcrResult {
-  sourceId: string;   // "image_text:<index>"
-  text: string;       // the user can edit this before checking
-  confidence: number; // 0-100 from the OCR engine, shown as a hint
-}
-
-// In code: extension/src/ports.ts (the Instagram integration calls this)
-export interface OcrPort {
-  readonly available: boolean;
-  readImageText(image: Blob, index: number): Promise<OcrResult>; // never uploads the image
-}
-// Stand-in until OCR exists: `unavailableOcr` (available: false, finds no text).
+// extension/src/ocr/index.ts
+// Reads text from one image on the user's computer. Never uploads the image.
+export async function readImageText(image: Blob, index: number,
+  options?: { signal?: AbortSignal; onProgress?: (p: OcrProgress) => void }): Promise<OcrResult>;
+export function startReview(result: OcrResult): OcrReview;            // user reviews/corrects
+export function reviewToTextSource(review: OcrReview): ToSourceResult; // -> { id: "image_text:<n>", type: "image_text", text }
+export function locateQuote(result: OcrResult, quote: string): QuoteLocation; // evidence quote -> word boxes
+export function imageBoxesToPreview(boxes: OcrBox[], layout: PreviewLayout): PreviewRect[]; // boxes -> resized preview
 ```
 
-- To plug in real OCR: implement `OcrPort` in `extension/src/ocr/index.ts` and pass it as `ocr` to `startInstagramIntegration()` at the bottom of `extension/src/content/main.ts`. It runs in the Instagram tab and gets the photo as a `Blob` read from the page's `blob:` image.
-- The popup and the Instagram panel both show OCR text in a "Text in the photo" box for the user to correct, then send it as `{ id: "image_text:<n>", type: "image_text", text }`.
-- Manifest V3 forbids remote code: the OCR engine, its WASM and language data must be bundled in `extension/` (see `docs/ROADMAP.md`). A content script may need `web_accessible_resources` for those files.
+- `OcrResult` has `sourceId`, `status` (`"text_found"` | `"no_text"`), `text`, mean `confidence`, `imageWidth`/`imageHeight`, and `words`/`lines` with stable ids (`image_text:1#w3`), boxes and per-word confidence.
+- **Failures throw `OcrError`** (`CANCELLED`, `NOT_AN_IMAGE`, `IMAGE_TOO_LARGE`, `ENGINE_LOAD_FAILED`, `RECOGNITION_FAILED`). A failure is never an empty "no text" result.
+- The OCR types live in `extension/src/ocr/types.ts`, **not** in `shared/contract.ts` as first proposed. They never cross the network or a Chrome message, and keeping boxes and image sizes out of the shared file means the backend can't start accepting them by accident. What crosses the network is the existing `TextSource`.
+- The popup shows the OCR text in the existing "Text in the photo" box for the user to correct, then sends it as `{ id: "image_text:<n>", type: "image_text", text }`.
+- Manifest V3 forbids remote code: the engine worker, WASM cores and English data are bundled into `dist/ocr/` by `extension/build.mjs`. The extension-page CSP with `'wasm-unsafe-eval'` is now in `manifest.json`.
+- **Instagram (owner 4):** the Instagram panel calls OCR through `OcrPort` in `extension/src/ports.ts`, which has the same shape as `readImageText()` and returns this `OcrResult`. The OCR worker can't start inside a content script, so connecting it means running OCR in an offscreen extension page and passing the photo there (never over the network). Until then Instagram uses the stand-in `unavailableOcr`, and the user types the photo's text.
 
 ### C. Instagram page → extension (owners 4 and 2) — **in code**, milestone 4
 
@@ -124,6 +122,7 @@ export interface HistoryImportRequest {
 ## Not done yet (do not assume these work)
 
 - **Live Databricks** has never been tested with real credentials. Run `npm run check:databricks` (in `backend/`) once someone has them; it must print `Success. Connection verified.`
-- OCR and history storage are not implemented (only their interfaces, with stand-ins).
+- The OCR module exists (`extension/src/ocr/`). It has been run in Chrome on a local test page under the extension CSP, but **not yet inside the loaded extension**, and **neither the popup nor the Instagram panel uses it yet**.
+- History storage is not implemented (only its interface in `ports.ts`, with a stand-in).
 - Instagram integration covers single-photo posts in English only. Blocking Share is verified on the live site; letting a share through and detecting "published" are **not** (that needs a real post). See `docs/ROADMAP.md`.
 - The popup has only been checked through its code and automated tests, not by clicking through it in Chrome.

@@ -161,11 +161,19 @@ export function startInstagramIntegration(options: IntegrationOptions) {
       const result = await options.ocr.readImageText(blob, 1); // the Blob never leaves this tab
       if (myTurn !== ocrTurn) return;
       imageText = result.text;
-      p.setImageText(result.text, `Read from the photo (confidence ${Math.round(result.confidence)}%). Fix any mistakes before checking.`);
+      const sure = result.confidence === null ? "" : ` (confidence ${Math.round(result.confidence)}%)`;
+      p.setImageText(
+        result.text,
+        result.status === "no_text"
+          ? "No text found in the photo. Type any text you can see in it."
+          : `Read from the photo${sure}. Fix any mistakes before checking.`,
+      );
       draftChanged();
-    } catch {
+    } catch (err) {
       if (myTurn !== ocrTurn) return;
-      p.setImageText("", "Reading the photo failed. Type any text you can see in it.");
+      // OCR errors carry a user-readable message (src/ocr/README.md). A failure is never "no text".
+      const reason = err instanceof Error ? ` ${err.message}` : "";
+      p.setImageText("", `Reading the photo failed.${reason} Type any text you can see in it.`);
     }
   }
 
