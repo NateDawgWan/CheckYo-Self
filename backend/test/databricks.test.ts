@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { PatTokenProvider, type TokenProvider } from "../src/auth";
-import { chat, DatabricksClient, invocationsPath } from "../src/databricks";
+import { chat, DatabricksClient, invocationsPath, MAX_OUTPUT_TOKENS } from "../src/databricks";
 import { AppError } from "../src/errors";
 
 const realFetch = globalThis.fetch;
@@ -59,7 +59,13 @@ test("sends the handoff's request: path, bearer token, messages, no redirect fol
   assert.equal(seen!.url, "https://app.example.test/serving-endpoints/gpt-oss-120b/invocations");
   assert.equal((seen!.init.headers as Record<string, string>).Authorization, "Bearer test-token");
   assert.equal(seen!.init.redirect, "manual");
-  assert.deepEqual(JSON.parse(seen!.init.body as string), { messages: MESSAGES, max_tokens: 2000, temperature: 0.1 });
+  assert.deepEqual(JSON.parse(seen!.init.body as string), { messages: MESSAGES, max_tokens: 4000, temperature: 0.1 });
+});
+
+test("the model may write up to 4000 tokens, the relay's maximum (2000 cut long answers mid-JSON)", () => {
+  // Regression: with 2000, posts with many things to flag came back cut off
+  // and were shown as "malformed JSON". The relay caps requests at 4000.
+  assert.equal(MAX_OUTPUT_TOKENS, 4000);
 });
 
 // --- Timeouts cover the response body -------------------------------------------
