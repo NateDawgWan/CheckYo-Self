@@ -59,13 +59,14 @@ backend/src/history/          store.ts (interface), memoryStore.ts (TEMPORARY de
                               appStore.ts (Databricks App store, unverified), relevance.ts
 backend/scripts/ping-databricks.ts   Live connection check (npm run check:databricks)
 backend/scripts/check-history.ts     Live history round trip (npm run check:history)
-extension/public/             manifest.json, popup.html, popup.css (copied to dist/)
+extension/public/             manifest.json, popup.html, popup.css ("Street Poster" design, also used by the Instagram panel), fonts.css + fonts/ (bundled Anton, Permanent Marker; licenses in fonts/) (copied to dist/)
 extension/src/popup.ts        Popup wiring, draft hashing, stale detection, apply-edit
 extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
 extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
 extension/src/dashboard/      Full-page dashboard (public/dashboard.html, opened as the extension's Options page): scores, cross-post view, offline keyword-rule mode
+extension/src/verdict.ts      Popup verdict: risk score, LOW/MEDIUM/HIGH stamp, "Before you drop that post" advice (display only; reuses dashboard/report.ts scoring)
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
 extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
 extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo
