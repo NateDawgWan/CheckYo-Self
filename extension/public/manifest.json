@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Second Look (MadHacks prototype)",
+  "name": "CheckYo'Self (MadHacks prototype)",
   "version": "0.2.0",
   "description": "Check what a post could reveal before you share it.",
   "action": {
-    "default_title": "Second Look",
+    "default_title": "CheckYo'Self",
     "default_popup": "popup.html"
   },
+  "options_page": "dashboard.html",
   "background": {
     "service_worker": "background.js",
     "type": "module"

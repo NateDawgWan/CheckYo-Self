@@ -64,6 +64,7 @@ const builds = [
       background: "src/background.ts",
       offscreen: "src/offscreen.ts",
       "ocr-demo": "src/ocr/demo/demo.ts",
+      dashboard: "src/dashboard/main.ts", // the full-page CheckYo'Self dashboard (public/dashboard.html)
     },
     format: "esm",
   },

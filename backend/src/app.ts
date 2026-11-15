@@ -80,7 +80,7 @@ export function createApp(deps: AppDeps) {
   /** Optional: only accept calls from our own extension (set ALLOWED_EXTENSION_ID). */
   function checkOrigin(req: Request, _res: Response, next: NextFunction) {
     if (deps.allowedExtensionId && req.headers.origin !== `chrome-extension://${deps.allowedExtensionId}`) {
-      return next(new AppError("FORBIDDEN", 403, "Requests are only accepted from the Second Look extension."));
+      return next(new AppError("FORBIDDEN", 403, "Requests are only accepted from the CheckYo'Self extension."));
     }
     next();
   }

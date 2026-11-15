@@ -64,6 +64,7 @@ extension/src/api.ts          Backend calls (BACKEND_URL), hashSources()
 extension/src/render.ts       Marked-up draft + finding cards (textContent only, no innerHTML)
 extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM; tested)
 extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
+extension/src/dashboard/      Full-page dashboard (public/dashboard.html, opened as the extension's Options page): scores, cross-post view, offline keyword-rule mode
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
 extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
 extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo
@@ -114,6 +115,8 @@ curl http://127.0.0.1:8787/api/health     # shows mode, databricks.state and his
 `ANALYSIS_MODE=mock` (the default) needs no `.env` at all; you can also set it for one run instead of editing `.env`.
 
 ## Rules
+
+- The product name is **CheckYo'Self** (shown in the popup, Instagram panel, dashboard and manifest). Some internal identifiers keep the old name "Second Look" on purpose, because renaming them would break things: the `X-Second-Look-User` header (shared with the Databricks App and stored history), the npm package names, the `second-look-panel` element and the Databricks service principal names.
 
 - Never commit `.env` or put secrets in `extension/`. Secrets come from environment variables on the backend.
 - Never log post text, user ids, tokens, or Databricks response bodies on the backend; log request IDs, statuses and counts.

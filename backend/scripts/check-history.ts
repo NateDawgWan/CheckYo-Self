@@ -25,7 +25,7 @@ try {
     postId: "check-post-1",
     status: "published" as const,
     publishedAt: "2026-01-01T00:00:00.000Z",
-    caption: "Second Look storage check. Synthetic text, safe to delete.",
+    caption: "CheckYo'Self storage check. Synthetic text, safe to delete.",
   };
 
   console.log("- importing 1 synthetic post for a throwaway test user ...");

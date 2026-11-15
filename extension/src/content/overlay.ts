@@ -69,16 +69,16 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   style.textContent = popupCss.replaceAll(":root", ":host") + PANEL_CSS;
 
   // Opens the panel only. Nothing is sent until "Check this post" inside it.
-  const launcher = button("Second Look: Check this post", "primary launcher", () => actions.onOpen());
+  const launcher = button("CheckYo'Self: Check this post", "primary launcher", () => actions.onOpen());
   launcher.hidden = true;
 
   const panel = el("section", "panel");
   panel.hidden = true;
   panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-label", "Second Look");
+  panel.setAttribute("aria-label", "CheckYo'Self");
 
   const head = el("div", "panel-head");
-  const title = el("h1", undefined, "Second Look");
+  const title = el("h1", undefined, "CheckYo'Self");
   head.append(title, button("Close", "secondary small close", () => actions.onBack()));
   const intro = el("p", "intro");
 
@@ -104,7 +104,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const consent = el(
     "p",
     "hint consent-note",
-    "“Check this post” sends your caption and the photo text above (as text only) to your Second Look backend, " +
+    "“Check this post” sends your caption and the photo text above (as text only) to your CheckYo'Self backend, " +
       "which uses a cloud AI model to analyze it. The photo itself never leaves your computer. Nothing is sent until you click it.",
   );
 
@@ -151,7 +151,7 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       title.textContent = reason === "share-clicked" ? "Before you share" : "Check this post";
       intro.textContent =
         reason === "share-clicked"
-          ? "Second Look paused sharing so you can check what this post could reveal. Nothing has been posted."
+          ? "CheckYo'Self paused sharing so you can check what this post could reveal. Nothing has been posted."
           : "Check what this post could reveal. The photo's text is read on your computer; review it below before checking.";
       panel.hidden = false;
       launcher.hidden = true;
@@ -203,8 +203,8 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
       // After "Continue" the panel closes (it can cover Instagram's Share
       // button), so the corner button tells the user what to do next.
       launcher.textContent = ready
-        ? "Second Look: ready. Click Instagram's Share to post."
-        : "Second Look: Check this post";
+        ? "CheckYo'Self: ready. Click Instagram's Share to post."
+        : "CheckYo'Self: Check this post";
     },
     destroy() {
       host.remove();
