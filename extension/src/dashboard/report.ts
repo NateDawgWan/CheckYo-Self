@@ -54,10 +54,12 @@ const CROSS_POST_BONUS = 1.2;
 
 /**
  * Categories where ONE leak can do serious harm on its own: ID numbers
- * (Social Security, passport, license), money (card or bank numbers) and
- * health. They weigh 1.5x and get higher minimum scores (see below).
+ * (Social Security, passport, license, birthday), money (card or bank
+ * numbers), health, and children (a kid's name with their school, team or
+ * age can be used to find them). They weigh 1.5x and get higher minimum
+ * scores (see below).
  */
-export const SENSITIVE_CATEGORIES: readonly Category[] = ["identity", "financial", "health"];
+export const SENSITIVE_CATEGORIES: readonly Category[] = ["identity", "financial", "health", "children"];
 const SENSITIVE_BONUS = 1.5;
 
 /** One finding's weight, between 0 and 0.95. */

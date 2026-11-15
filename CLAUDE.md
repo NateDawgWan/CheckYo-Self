@@ -67,7 +67,7 @@ extension/src/edits.ts        Rules for applying a suggested edit safely (no DOM
 extension/src/ocr/            Local OCR: readImageText(), review step, quote->box, preview coords (see its README.md)
 extension/src/dashboard/      Full-page dashboard (public/dashboard.html, opened as the extension's Options page): scores, cross-post view, offline keyword-rule mode
 extension/src/verdict.ts      Popup verdict: risk score, LOW/MEDIUM/HIGH stamp, "Before you drop that post" advice (display only; reuses dashboard/report.ts scoring)
-                              Scoring: findings add up, but never below the worst single finding's minimum (findingFloor: sensitive high 75, high 50, sensitive medium 50, medium 25; halved at low confidence). Sensitive = identity, financial, health (1.5x weight).
+                              Scoring: findings add up, but never below the worst single finding's minimum (findingFloor: sensitive high 75, high 50, sensitive medium 50, medium 25; halved at low confidence). Sensitive = identity, financial, health, children (1.5x weight).
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
 extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
 extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo

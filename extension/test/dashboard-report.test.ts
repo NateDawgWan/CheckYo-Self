@@ -202,6 +202,7 @@ test("minimums: sensitive high 75, high 50, sensitive medium 50, medium 25, low 
   assert.equal(findingFloor(finding({ category: "location", severity: "high" })), 50);
   assert.equal(findingFloor(finding({ category: "financial", severity: "medium" })), 50);
   assert.equal(findingFloor(finding({ category: "location", severity: "medium" })), 25);
+  assert.equal(findingFloor(finding({ category: "children", severity: "medium" })), 50);
   assert.equal(findingFloor(finding({ category: "health", severity: "low" })), 0);
   assert.equal(findingFloor(finding({ category: "identity", severity: "high", confidence: "low" })), 38);
 });

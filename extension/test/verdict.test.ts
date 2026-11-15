@@ -93,8 +93,8 @@ test("any single high-severity finding reaches HIGH", () => {
   assert.equal(v.stamp, "HIGH");
 });
 
-test("card numbers and health details count as sensitive too", () => {
-  for (const category of ["financial", "health"] as const) {
+test("card numbers, health details and children count as sensitive too", () => {
+  for (const category of ["financial", "health", "children"] as const) {
     const v = verdictFor(response([finding({ category, severity: "high" })]), sources);
     assert.ok(v.score >= 75, `${category}: score was ${v.score}`);
   }
