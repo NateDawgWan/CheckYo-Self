@@ -4,6 +4,7 @@
 //   2. a quality check, so a noisy, low-quality read is explained to the user
 //      instead of being passed along silently.
 // No DOM and no Chrome here, so it can be tested in Node (test/photo-text.test.ts).
+import { isJunkWord } from "./ocr/scene";
 import type { OcrResult } from "./ocr/types";
 
 /**
@@ -52,22 +53,8 @@ export const POOR_MEAN_CONFIDENCE = 60;
 /** If at least this share of the words are unclear or junk, the read is poor. */
 export const POOR_NOISE_SHARE = 0.4;
 
-/** Punctuation that stands alone in real text, e.g. "U10 Tigers - Spring Season", "Salt & Pepper". */
-const NORMAL_SEPARATORS = /^[-–—&+/]$/;
-
-/**
- * Is this "word" probably noise rather than real text? For example "©", "~",
- * "00000000000", "oooo", or a stray single letter. (Single digits like "3" on a
- * jersey, and separators like "-" or "&", are kept as real.)
- */
-export function isJunkWord(word: string): boolean {
-  if (NORMAL_SEPARATORS.test(word.trim())) return false;
-  const core = word.replace(/[^\p{L}\p{N}]/gu, "");
-  if (core.length === 0) return true;                   // only symbols: "©", "~", ":"
-  if (/(.)\1{3,}/iu.test(core)) return true;            // 4+ of the same character: "00000000000"
-  if (core.length === 1 && /\p{L}/u.test(core) && !/^[aAiI]$/.test(core)) return true; // stray letter
-  return false;
-}
+// isJunkWord lives with the OCR code that also uses it to keep only readable lines.
+export { isJunkWord };
 
 export type PhotoQuality = "clean" | "noisy" | "poor" | "no_text";
 
@@ -153,6 +140,27 @@ export function unreliableReadNotice(result: OcrResult, quality: QualityReport):
   );
 }
 
+function bits(n: number): string {
+  return `${n} unclear bit${n === 1 ? "" : "s"}`;
+}
+
+/** The reader found only unclear shapes (all left out by the OCR engine, see ocr/scene.ts). */
+export function unclearOnlyNotice(dropped: number): string {
+  return (
+    `No readable text found. The text reader only saw ${bits(dropped)} it couldn't read clearly, so nothing was added. ` +
+    "Buildings, brickwork, windows, patterns and scenery often look like letters to it. " +
+    "If the photo does have text you want checked, type it in the box."
+  );
+}
+
+/** Some text was read clearly; the unclear rest was left out. */
+export function partialReadNotice(dropped: number): string {
+  return (
+    `Only the clearly readable text was kept; ${bits(dropped)} (often brickwork, windows or patterns) ` +
+    `${dropped === 1 ? "was" : "were"} left out. If the photo has other text you want checked, add it in the box.`
+  );
+}
+
 /**
  * Applies the confidence check and the size limit to one OCR result.
  * Used by both the popup ("Add a photo") and the Instagram panel (content/main.ts),
@@ -166,6 +174,18 @@ export function unreliableReadNotice(result: OcrResult, quality: QualityReport):
  */
 export function describePhotoRead(result: OcrResult): PhotoReadView {
   const quality = assessPhotoQuality(result);
+  const dropped = result.droppedWords ?? 0;
+  if (result.words.length === 0 && dropped > 0) {
+    // The reader saw only shapes it couldn't read clearly (the OCR engine already left them out).
+    return {
+      text: "",
+      notices: [{ kind: "poor", text: unclearOnlyNotice(dropped) }],
+      hint: "Nothing was read from this photo. Type any text you can see in it, or leave the box empty.",
+      quality: "poor",
+      truncated: false,
+      discarded: true,
+    };
+  }
   if (quality.level === "poor") {
     return {
       text: "",
@@ -179,6 +199,7 @@ export function describePhotoRead(result: OcrResult): PhotoReadView {
   const limited = limitPhotoText(result.text);
   const notices: PhotoReadNotice[] = [];
   if (quality.message) notices.push({ kind: "warning", text: quality.message }); // "noisy": some unclear words
+  if (dropped > 0 && limited.text.trim()) notices.push({ kind: "warning", text: partialReadNotice(dropped) });
   if (limited.truncated) notices.push({ kind: "warning", text: truncationNotice(limited) });
   const sure = result.confidence === null ? "" : ` (confidence ${Math.round(result.confidence)}%)`;
   const hint =
