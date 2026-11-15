@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HISTORY_LIMITS, USER_ID_PATTERN } from "../../shared/contract";
-import { findPostFiles, fixExportText, joinPhotoTexts, parsePostFiles, resolvePhotoPath } from "../src/instagram-export";
+import { findPostFiles, fixExportText, joinPhotoTexts, jsonFilesSeen, parsePostFiles, resolvePhotoPath } from "../src/instagram-export";
 import { isValidUserId, newUserId } from "../src/user-id";
 
 // Instagram writes "I’m at the café" as UTF-8 bytes, one per character:
@@ -47,6 +47,35 @@ test("finds posts_1.json in a media folder too (a real 2026 export), but not pos
     "Instagram_folder/posts/17963947307997283.jpg",
   ]);
   assert.deepEqual(files, ["Instagram_folder/media/posts_1.json"]);
+});
+
+test("an export with only the newer posts.json is read; with both, posts_N.json wins (no duplicates)", () => {
+  assert.deepEqual(findPostFiles(["ig/media/posts.json", "ig/posts/1.jpg"]), ["ig/media/posts.json"]);
+  assert.deepEqual(findPostFiles(["ig/media/posts.json", "ig/media/posts_1.json"]), ["ig/media/posts_1.json"]);
+  assert.deepEqual(findPostFiles(["ig/media/stories.json", "ig/a.jpg"]), []);
+  assert.deepEqual(jsonFilesSeen(["ig/media/stories.json", "ig/a.jpg", "ig\\x\\Y.JSON"]), ["ig/media/stories.json", "ig/x/Y.JSON"]);
+});
+
+test("the newer label-based posts.json format is parsed; drafts and unpublished posts are skipped", () => {
+  const label = (name: string, rest: object) => ({ label: name, ...rest });
+  const labelled = JSON.stringify([
+    { timestamp: 1794748844, fbid: "1", media: [], label_values: [
+      label("Media", { media: [{ uri: "media/posts/1.jpg", creation_timestamp: 1794748843, title: "" }] }),
+      label("Caption", { value: "Back home on Maple St" }), label("Draft", { value: "False" }), label("Published", { value: "True" }),
+    ] },
+    { timestamp: 1794748900, fbid: "2", media: [], label_values: [
+      label("Media", { media: [{ uri: "media/posts/2.jpg", creation_timestamp: 1794748900, title: "" }] }),
+      label("Caption", { value: "a draft" }), label("Draft", { value: "True" }),
+    ] },
+    { timestamp: 1794749000, fbid: "3", media: [], label_values: [label("Caption", { value: "no media" })] },
+  ]);
+  const { posts, skipped } = parsePostFiles([labelled]);
+  assert.equal(skipped, 2);
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0], {
+    postId: "ig_1794748844", publishedAt: new Date(1794748844 * 1000).toISOString(), caption: "Back home on Maple St",
+    photos: ["media/posts/1.jpg"], mediaCount: 1, hasVideo: false,
+  });
 });
 
 test("photo files are found even when the folder layout differs from the uri in the JSON", () => {

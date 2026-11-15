@@ -6,6 +6,7 @@
 //   POST   /api/history/import                        -> HistoryImportResponse
 //   GET    /api/history                               -> HistoryListResponse
 //   POST   /api/history/suggest                       -> HistorySuggestResponse
+//   POST   /api/history/assess                        -> HistoryAssessResponse
 //   DELETE /api/history/posts/:postId                 -> HistoryDeleteResponse
 //   POST   /api/history/approvals/:approvalId/revoke  -> HistoryDeleteResponse
 //   DELETE /api/history                               -> HistoryDeleteResponse
@@ -20,6 +21,7 @@ import {
   type DatabricksStatus,
   type ErrorResponse,
   type HealthResponse,
+  type HistoryAssessResponse,
   type HistoryDeleteResponse,
   type HistoryImportResponse,
   type HistoryListResponse,
@@ -42,10 +44,11 @@ import {
 import { buildHistorySources, suggestHistory } from "./history/relevance";
 import type { AiInterpretation, HistoryStore } from "./history/store";
 import type { ParsedAnalysis } from "./parse";
-import type { ChatMessage } from "./prompt";
+import type { AnalysisTask, ChatMessage } from "./prompt";
 import {
   validateAnalyzeRequest,
   validateApprovalId,
+  validateHistoryAssess,
   validateHistoryImport,
   validateHistorySuggest,
   validatePortfolioScan,
@@ -65,7 +68,7 @@ export interface AppDeps {
    * Runs the analysis. In "databricks" mode this calls Databricks and parses
    * the answer; errors are passed on. It must NEVER fall back to mock results.
    */
-  analyze: (sources: TextSource[]) => Promise<ParsedAnalysis>;
+  analyze: (sources: TextSource[], task?: AnalysisTask) => Promise<ParsedAnalysis>;
   /**
    * Raw model call used to build the profile (portfolio.ts parses it).
    * Null in mock mode: the profile needs the live AI and is never faked.
@@ -267,6 +270,49 @@ export function createApp(deps: AppDeps) {
     }),
   );
 
+  // What the user's saved posts reveal TOGETHER (no draft). Only the posts the
+  // user chose, only from THIS user's approved history; nothing added or swapped.
+  app.post(
+    "/api/history/assess",
+    checkOrigin,
+    route(async (req, res) => {
+      const requestId: string = res.locals.requestId;
+      const startedAt = Date.now();
+      const userId = userIdOf(req);
+      const request = validateHistoryAssess(req.body);
+      const stored = new Map((await deps.historyStore.listPosts(userId)).map((p) => [p.postId, p]));
+      const missing = request.postIds.filter((id) => !stored.has(id));
+      if (missing.length > 0) {
+        throw new AppError("BAD_REQUEST", 400, `${missing.length} chosen post(s) are not in your saved history (deleted?). Refresh the page and try again.`);
+      }
+      const chosen = buildHistorySources([], request.postIds.map((id) => stored.get(id)!), HISTORY_LIMITS.maxPostsPerAssessment);
+      const result = await deps.analyze(chosen.sources, "history");
+      const body: HistoryAssessResponse = {
+        contractVersion: CONTRACT_VERSION,
+        requestId,
+        mode: deps.mode,
+        model: deps.model,
+        promptVersion: deps.promptVersion,
+        analyzedAt: new Date().toISOString(),
+        summary: result.summary,
+        findings: result.findings,
+        droppedFindings: result.droppedFindings,
+        postsAssessed: chosen.used,
+      };
+      // Privacy: ids and counts only.
+      console.log(
+        `[${requestId}] history assess mode=${deps.mode} posts=${chosen.used.length} findings=${body.findings.length} ` +
+          `crossPost=${body.findings.filter((f) => f.crossSource).length} dropped=${body.droppedFindings} ${Date.now() - startedAt}ms`,
+      );
+      res.json(body);
+      // Same rule as /api/analyze: keep AI conclusions about saved posts (never mock results).
+      if (deps.mode === "databricks") {
+        const interpretations = interpretationsFrom(body);
+        if (interpretations.length > 0) saveInBackground(userId, interpretations, requestId);
+      }
+    }),
+  );
+
   app.delete(
     "/api/history/posts/:postId",
     checkOrigin,
@@ -395,7 +441,9 @@ export function createApp(deps: AppDeps) {
 }
 
 /** AI findings that rely on verified quotes from earlier posts. */
-export function interpretationsFrom(response: AnalyzeResponse): AiInterpretation[] {
+export function interpretationsFrom(
+  response: Pick<AnalyzeResponse, "findings" | "model" | "promptVersion" | "requestId" | "analyzedAt">,
+): AiInterpretation[] {
   const result: AiInterpretation[] = [];
   for (const finding of response.findings) {
     const historyEvidence = finding.evidence.filter((e) => e.verified && e.sourceId.startsWith("history:"));

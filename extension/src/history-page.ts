@@ -6,8 +6,9 @@
 // text to the backend (history-api.ts). Photos never leave the computer.
 import { HISTORY_LIMITS, type HistoryPost, type StoredHistoryPost } from "../../shared/contract";
 import { checkHealth, describeBackendStatus } from "./api";
-import { deleteAllHistory, deleteHistoryPost, getPortfolio, importHistory, listHistory, scanPortfolio } from "./history-api";
-import { findPostFiles, joinPhotoTexts, parsePostFiles, resolvePhotoPath, type ExportPost } from "./instagram-export";
+import { assessHistory, deleteAllHistory, deleteHistoryPost, getPortfolio, importHistory, listHistory, scanPortfolio } from "./history-api";
+import { assessmentView, pickPostsToAssess } from "./history-assess";
+import { findPostFiles, joinPhotoTexts, jsonFilesSeen, parsePostFiles, resolvePhotoPath, type ExportPost } from "./instagram-export";
 import { OcrError, readImageText } from "./ocr";
 import { describePhotoRead } from "./photo-text";
 
@@ -46,6 +47,10 @@ const profileBuild = byId<HTMLButtonElement>("profile-build");
 const profileProgress = byId<HTMLProgressElement>("profile-progress");
 const profileMessage = byId<HTMLParagraphElement>("profile-message");
 const profileList = byId<HTMLUListElement>("profile-list");
+const assessScope = byId<HTMLParagraphElement>("assess-scope");
+const assessButton = byId<HTMLButtonElement>("assess");
+const assessMessage = byId<HTMLParagraphElement>("assess-message");
+const assessResult = byId<HTMLDivElement>("assess-result");
 
 let saved: StoredHistoryPost[] = [];
 let exportPosts: ExportPost[] = [];
@@ -81,6 +86,7 @@ async function loadSaved(keepMessage = false) {
     return;
   }
   if (!keepMessage) setText(savedMessage, "");
+  assessResult.hidden = true; // the saved posts may have changed: an old assessment could cite deleted posts
   savedSummary.textContent =
     saved.length === 0
       ? "No posts saved yet. Import some below."
@@ -101,6 +107,65 @@ async function loadSaved(keepMessage = false) {
   );
   renderPicker(); // "already saved" labels may have changed
   void loadProfile(); // saved posts changed, so the profile summary may have too
+  updateAssessScope();
+}
+
+// --- What the saved posts reveal together --------------------------------------------
+
+/** Says exactly which posts "Assess" will send (consent), and enables the button. */
+function updateAssessScope() {
+  const { postIds, left } = pickPostsToAssess(saved);
+  assessButton.disabled = busy || postIds.length === 0;
+  assessScope.textContent =
+    postIds.length === 0
+      ? "Save some posts first."
+      : `"Assess my saved posts" sends the captions and photo text of your ${postIds.length} most recent saved post${postIds.length === 1 ? "" : "s"}` +
+        `${left ? ` (${left} older or very long one${left === 1 ? " is" : "s are"} left out)` : ""} to your CheckYo'Self backend, which uses a cloud AI model to read them together.`;
+}
+
+async function assessSaved() {
+  const { postIds } = pickPostsToAssess(saved);
+  if (postIds.length === 0) return;
+  busy = true;
+  assessButton.disabled = true;
+  assessResult.hidden = true;
+  setText(assessMessage, `Reading your ${postIds.length} saved posts together…`);
+  try {
+    const response = await assessHistory(postIds);
+    const view = assessmentView(response, saved, shortDate);
+    setText(assessMessage, "");
+    const verdict = byId<HTMLDivElement>("assess-verdict");
+    verdict.dataset.level = view.verdict.complete ? view.verdict.level : "incomplete";
+    byId("assess-score").textContent = String(view.verdict.score);
+    byId("assess-stamp").textContent = view.verdict.stamp;
+    byId("assess-headline").textContent = view.headline;
+    byId("assess-note").textContent = view.note || `Estimate from the findings · ${view.postsAssessed} posts read together`;
+    byId("assess-summary").textContent = response.summary;
+    byId("assess-list").replaceChildren(
+      ...view.findings.map((f) => {
+        const li = el("li", `hist-item assess-item${f.crossPost ? " is-cross" : ""}`);
+        const tags = el("div", "assess-tags");
+        tags.append(el("span", `assess-tag sev-${f.finding.severity}`, `${f.finding.severity} risk`));
+        if (f.crossPost) tags.append(el("span", "assess-tag cross", `Combines ${f.postCount} posts`));
+        tags.append(el("span", "hist-date", f.finding.category.replace("_", " ")));
+        const evidence = el("ul", "assess-evidence");
+        for (const e of f.evidence) {
+          const item = el("li");
+          item.append(el("span", "hist-date", `Post: ${e.postLabel}`), el("span", undefined, `“${e.quote}”`));
+          evidence.append(item);
+        }
+        li.append(tags, el("p", "assess-exposure", f.finding.exposure), evidence);
+        if (f.finding.uncertainty) li.append(el("p", "assess-why", `Might be wrong because: ${f.finding.uncertainty}`));
+        return li;
+      }),
+    );
+    assessResult.hidden = false;
+  } catch (err) {
+    setText(assessMessage, `Couldn't assess: ${(err as Error).message}`, "error");
+  } finally {
+    busy = false;
+    updateAssessScope();
+  }
 }
 
 async function removeOne(postId: string) {
@@ -195,17 +260,37 @@ function photoFile(uri: string): File | undefined {
   return path === undefined ? undefined : photoFiles.get(path);
 }
 
+/** Says exactly what was looked at, so a wrong folder is easy to spot. */
+function noPostsMessage(folder: string, paths: string[]): string {
+  const json = jsonFilesSeen(paths);
+  const seen = json.length
+    ? `The .json files in it are: ${json.slice(0, 8).join(", ")}${json.length > 8 ? ` and ${json.length - 8} more` : ""}.`
+    : "It has no .json files at all.";
+  return (
+    `No posts found in "${folder}" (${paths.length} file${paths.length === 1 ? "" : "s"} looked at). ${seen} ` +
+    "Pick the UNZIPPED export folder: the one that has posts_1.json or posts.json inside (usually in a media or content folder). " +
+    "If you picked a .zip, unzip it first (right-click → Extract All)."
+  );
+}
+
 async function readExportFolder(files: FileList) {
   const all = [...files];
   const byPath = new Map(all.map((f) => [f.webkitRelativePath.replaceAll("\\", "/"), f]));
-  const postFiles = findPostFiles([...byPath.keys()]);
+  const paths = [...byPath.keys()];
+  const folder = paths[0]?.split("/")[0] || "the chosen folder";
+  const postFiles = findPostFiles(paths);
   if (postFiles.length === 0) {
     picker.hidden = true;
-    setText(importStatus, "No posts found. Pick the UNZIPPED export folder: the one that contains posts_1.json (in a content or media folder, possibly inside your_instagram_activity).", "error");
+    setText(importStatus, noPostsMessage(folder, paths), "error");
     return;
   }
   const texts = await Promise.all(postFiles.map((p) => byPath.get(p)!.text()));
   const { posts, skipped } = parsePostFiles(texts);
+  if (posts.length === 0) {
+    picker.hidden = true;
+    setText(importStatus, `Read ${postFiles.join(", ")} in "${folder}", but found no published posts in it (${skipped} entries weren't posts, or were drafts).`, "error");
+    return;
+  }
   exportPosts = posts;
   photoFiles = new Map(all.map((f) => [withoutRoot(f.webkitRelativePath), f]));
   picked.clear();
@@ -328,6 +413,7 @@ byId<HTMLButtonElement>("select-none").addEventListener("click", () => {
 });
 importButton.addEventListener("click", () => void importPicked());
 profileBuild.addEventListener("click", () => void buildProfile());
+assessButton.addEventListener("click", () => void assessSaved());
 
 void showBackendStatus();
 void loadSaved();

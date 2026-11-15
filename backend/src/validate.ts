@@ -7,6 +7,7 @@ import {
   LIMITS,
   USER_ID_PATTERN,
   type AnalyzeRequest,
+  type HistoryAssessRequest,
   type HistoryImportRequest,
   type HistoryPost,
   type HistorySuggestRequest,
@@ -74,6 +75,20 @@ export function validateAnalyzeRequest(body: unknown): AnalyzeRequest {
     if (body.usePortfolio) request.usePortfolio = true;
   }
   return request;
+}
+
+/** POST /api/history/assess: the saved posts the user chose (ids only). */
+export function validateHistoryAssess(body: unknown): HistoryAssessRequest {
+  if (!isPlainObject(body)) fail("Body must be a JSON object.");
+  checkOnlyKeys(body, ["contractVersion", "postIds"], "request");
+  checkContractVersion(body.contractVersion);
+  if (!Array.isArray(body.postIds) || body.postIds.length === 0) fail("postIds must be a non-empty list of saved post ids.");
+  if (body.postIds.length > HISTORY_LIMITS.maxPostsPerAssessment) {
+    fail(`Assess at most ${HISTORY_LIMITS.maxPostsPerAssessment} saved posts at a time.`);
+  }
+  const ids = body.postIds.map(validatePostId);
+  if (new Set(ids).size !== ids.length) fail("postIds lists the same post twice.");
+  return { contractVersion: CONTRACT_VERSION, postIds: ids };
 }
 
 /** POST /api/history/portfolio/scan: nothing but the contract version. */

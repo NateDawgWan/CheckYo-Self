@@ -19,3 +19,21 @@ body.history-page { width: auto; max-width: 820px; margin: 0 auto; }
 .hist-photo-text { margin: 4px 0 0; font-size: 12px; white-space: pre-wrap; border-left: 3px solid var(--line); padding-left: 6px; }
 button.danger { color: var(--high, #b4302a); border-color: currentColor; }
 .history-page .message { margin-top: 6px; }
+
+/* "What your posts reveal together" */
+.assess-result { margin-top: 10px; }
+/* The verdict's colors are made for the dark "results" wall (popup.css), so give it one here too. */
+.assess-result .verdict { margin-bottom: 10px; padding: 16px 18px 14px; background: var(--asphalt); color: var(--cream); }
+.assess-summary { margin: 6px 0; font-size: 13px; }
+.assess-item { grid-template-columns: 1fr; }
+.assess-item.is-cross { box-shadow: 4px 4px 0 var(--accent, #e63935); }
+.assess-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; }
+.assess-tag { font: 600 10.5px/1.2 var(--mono, monospace); text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px; border: 2px solid var(--asphalt); }
+.assess-tag.sev-high { background: var(--high, #b4302a); color: #fff; }
+.assess-tag.sev-medium { background: var(--lime, #d4f53c); }
+.assess-tag.cross { background: var(--asphalt, #111); color: #fff; }
+.assess-exposure { margin: 2px 0 6px; font-size: 13.5px; font-weight: 600; }
+.assess-evidence { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.assess-evidence li { font-size: 12.5px; border-left: 3px solid var(--line); padding-left: 6px; }
+.assess-evidence .hist-date { display: block; }
+.assess-why { margin: 6px 0 0; font-size: 12px; color: var(--muted); }

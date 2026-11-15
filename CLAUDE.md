@@ -72,6 +72,7 @@ extension/src/verdict.ts      Popup verdict: risk score, LOW/MEDIUM/HIGH stamp, 
 extension/src/background.ts   Service worker: Chrome messages -> api.ts -> backend; relays the photo to the OCR page
 extension/src/ocr-relay.ts    Photo relay messages + checks (in-browser only, never in the contract; tested)
 extension/src/offscreen.ts    Offscreen page (public/offscreen.html): runs local OCR on the Instagram photo
+extension/src/history-assess.ts  History page "What your posts reveal together": picks saved posts to send (POST /api/history/assess), score + cross-post findings view (tested)
 extension/src/photo-text.ts   Photo-text rules (popup + Instagram): unreliable reads are discarded (empty box + notice), noisy reads get a notice, left-out junk is reported, strict 1000-char limit (tested)
 extension/src/worker-handler.ts  What the worker does with each message (no Chrome calls; tested)
 extension/src/messages.ts     Checks Chrome messages: known kinds, text only (tested)
