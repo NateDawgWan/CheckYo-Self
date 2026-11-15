@@ -3,7 +3,7 @@
 // "image_text:<n>" source, and the user's typing is never overwritten.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PhotoSet } from "../src/content/photo-set";
+import { carouselProgress, PhotoSet } from "../src/content/photo-set";
 import { sourceLabel } from "../src/render";
 
 test("photos are numbered in the order they first appear (carousel slides one by one)", () => {
@@ -80,4 +80,17 @@ test("findings name the photo a quote came from when a post has several", () => 
   assert.equal(sourceLabel(undefined, "image_text:1", 2), "Photo 1 text");
   assert.equal(sourceLabel(undefined, "image_text:2", 2), "Photo 2 text");
   assert.equal(sourceLabel(undefined, "caption", 2), "Caption");
+});
+
+test("carousel prompt: asks to click through until the last photo is shown and read", () => {
+  const start = carouselProgress(1, false, true);
+  assert.equal(start.complete, false);
+  assert.ok(start.launcher.includes("click › to show each photo (1 read)"), start.launcher);
+  assert.match(start.banner, /several photos.*Click the › arrow/);
+  // Last photo reached but still reading: not complete yet.
+  assert.equal(carouselProgress(3, true, true).complete, false);
+  const done = carouselProgress(3, true, false);
+  assert.equal(done.complete, true);
+  assert.match(done.launcher, /all 3 photos read/);
+  assert.match(done.banner, /All 3 photos read ✓/);
 });

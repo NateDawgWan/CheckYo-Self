@@ -35,6 +35,9 @@ const PANEL_CSS = `
 .panel-head h1 { font-size: 16px; }
 .panel-head-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .close { padding: 2px 8px; }
+.photos-note { margin: 8px 0; padding: 8px 10px; border: 2px solid var(--asphalt, #151515); background: var(--amber, #f0a43a); color: var(--asphalt, #151515); font-weight: 700; font-size: 13px; }
+.photos-note.is-done { background: var(--lime, #d6f04a); }
+.photos-note[hidden] { display: none; }
 .intro { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .share-ready { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--low-mark); color: var(--low); font-weight: 600; }
 .actions { flex-wrap: wrap; }
@@ -91,7 +94,8 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   const intro = el("p", "intro");
 
   // One block per photo ("Text in photo N"), drawn by setPhotos().
-  const photosNote = el("p", "hint photos-note");
+  const photosNote = el("p", "photos-note");
+  photosNote.setAttribute("role", "status");
   const photoBlocks = el("div", "photo-blocks");
 
   const checkButton = button("Check this post", "primary", () => actions.onCheck());
@@ -160,6 +164,16 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
   document.documentElement.append(host);
 
   let hasResult = false;
+  let isShareReady = false;
+  let launcherPrompt: string | null = null; // e.g. "click › to show each photo"
+
+  function updateLauncherText() {
+    // After "Continue" the panel closes (it can cover Instagram's Share
+    // button), so the corner button tells the user what to do next.
+    launcher.textContent = isShareReady
+      ? "CheckYo'Self: ready. Click Instagram's Share to post."
+      : (launcherPrompt ?? "CheckYo'Self: Check this post");
+  }
   let stale = false;
 
   function updateContinueLabel() {
@@ -185,8 +199,10 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
     isOpen() {
       return !panel.hidden;
     },
-    setPhotos(photos: PhotoView[], note: string) {
-      photosNote.textContent = note;
+    setPhotos(photos: PhotoView[], note) {
+      photosNote.textContent = note.text;
+      photosNote.hidden = !note.text;
+      photosNote.classList.toggle("is-done", note.done);
       // Keep existing boxes (so typing isn't interrupted); add or remove as needed.
       while (photoBlocks.children.length > photos.length) photoBlocks.lastElementChild!.remove();
       photos.forEach((photo, i) => {
@@ -254,11 +270,12 @@ export function createOverlayPanel(actions: WarningPanelActions): WarningPanel {
     },
     setShareReady(ready) {
       shareReady.hidden = !ready;
-      // After "Continue" the panel closes (it can cover Instagram's Share
-      // button), so the corner button tells the user what to do next.
-      launcher.textContent = ready
-        ? "CheckYo'Self: ready. Click Instagram's Share to post."
-        : "CheckYo'Self: Check this post";
+      isShareReady = ready;
+      updateLauncherText();
+    },
+    setLauncherPrompt(text) {
+      launcherPrompt = text;
+      updateLauncherText();
     },
     destroy() {
       host.remove();

@@ -18,6 +18,7 @@ export interface InstagramText {
   published: string[]; // text shown after a successful share
   failed: string[];    // text shown when a share fails
   slideArrows: string[]; // aria-labels of the arrows next to the photo when SEVERAL photos are selected
+  slideNext: string[];   // the ones among slideArrows that go to the NEXT photo (to the right)
 }
 
 /**
@@ -36,6 +37,7 @@ export const TEXT_BY_LANGUAGE: Record<string, InstagramText> = {
     // NOT "Down chevron icon": that is on the Accessibility / Advanced settings
     // sections of every post. "go back"/"next" are older guesses (UNVERIFIED).
     slideArrows: ["right chevron", "left chevron", "go back", "next"],
+    slideNext: ["right chevron", "next"],
   },
 };
 
@@ -98,6 +100,24 @@ export function isCarouselHintLabel(label: string | null | undefined, words: Ins
   return words.slideArrows.includes((label ?? "").trim().toLowerCase());
 }
 
+/**
+ * Which carousel arrows are showing. Instagram shows only the arrows that
+ * apply (VERIFIED 2026-11-15: "Right chevron" on photo 1, "Left chevron" on
+ * photo 2 of a 2-photo post), so: a "next" arrow means more photos to the
+ * right; only a "previous" arrow means this is the LAST photo.
+ */
+export function carouselArrows(labels: (string | null | undefined)[], words: InstagramText): { hasNext: boolean; hasPrev: boolean } {
+  let hasNext = false;
+  let hasPrev = false;
+  for (const raw of labels) {
+    const label = (raw ?? "").trim().toLowerCase();
+    if (!words.slideArrows.includes(label)) continue;
+    if (words.slideNext.includes(label)) hasNext = true;
+    else hasPrev = true;
+  }
+  return { hasNext, hasPrev };
+}
+
 /** Images smaller than this (in CSS pixels) are icons or avatars, not the post. */
 const MIN_PREVIEW_SIZE = 150;
 
@@ -147,10 +167,12 @@ export interface ComposerSnapshot {
   /** The selected photos, in order (one for a single-photo post). */
   images: PreviewImage[];
   postType: PostType;
+  /** Visible carousel arrows (both false for a single photo). */
+  carousel: { hasNext: boolean; hasPrev: boolean };
 }
 
 const NO_COMPOSER: ComposerSnapshot = {
-  step: "none", dialog: null, editor: null, shareButton: null, caption: "", images: [], postType: "unknown",
+  step: "none", dialog: null, editor: null, shareButton: null, caption: "", images: [], postType: "unknown", carousel: { hasNext: false, hasPrev: false },
 };
 
 function isVisible(node: Element): boolean {
@@ -198,11 +220,14 @@ export function readComposer(doc: Document): ComposerSnapshot {
     if (!editor || !shareButton) continue;
 
     const images = findPreviewImages(dialog);
+    // Only arrows actually on screen count (a hidden one isn't clickable).
+    const arrowLabels = [...dialog.querySelectorAll(SELECTORS.labelled)]
+      .filter((node) => isVisible(node))
+      .map((node) => node.getAttribute("aria-label"));
     const postType = classifyPostType({
       photoCount: images.length,
       hasVideo: dialog.querySelector(SELECTORS.video) !== null,
-      carouselHints: [...dialog.querySelectorAll(SELECTORS.labelled)]
-        .filter((node) => isCarouselHintLabel(node.getAttribute("aria-label"), words)).length,
+      carouselHints: arrowLabels.filter((label) => isCarouselHintLabel(label, words)).length,
     });
 
     return {
@@ -213,6 +238,7 @@ export function readComposer(doc: Document): ComposerSnapshot {
       caption: normalizeCaption(editor.innerText ?? editor.textContent ?? ""),
       images,
       postType,
+      carousel: carouselArrows(arrowLabels, words),
     };
   }
   // A dialog with a Share-less "Next" button, etc. We only care that a
