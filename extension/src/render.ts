@@ -11,11 +11,25 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
-export function sourceLabel(source: TextSource | undefined, sourceId: string): string {
+/**
+ * A source's name on screen. With several photos (a carousel), each photo's
+ * text is numbered ("Photo 2 text") so you can tell where a quote came from.
+ */
+export function sourceLabel(source: TextSource | undefined, sourceId: string, photoCount = 1): string {
   if (sourceId === "caption") return "Caption";
-  if (sourceId.startsWith("image_text")) return "Photo text";
+  if (sourceId.startsWith("image_text")) {
+    const n = sourceId.split(":")[1];
+    return photoCount > 1 && n ? `Photo ${n} text` : "Photo text";
+  }
   if (sourceId.startsWith("history")) return source?.date ? `Earlier post, ${source.date.slice(0, 10)}` : "Earlier post";
   return sourceId;
+}
+
+/** How many photo-text sources a draft has (several = a carousel). */
+function countPhotos(sources: Iterable<TextSource>): number {
+  let n = 0;
+  for (const s of sources) if (s.type === "image_text") n++;
+  return n;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -179,7 +193,7 @@ function renderFinding(
     const item = el("li");
     const btn = el("button");
     btn.type = "button";
-    btn.append(el("span", "source-tag", sourceLabel(sourcesById.get(ev.sourceId), ev.sourceId)));
+    btn.append(el("span", "source-tag", sourceLabel(sourcesById.get(ev.sourceId), ev.sourceId, countPhotos(sourcesById.values()))));
     btn.append(el("span", "quote", `“${ev.quote}”`));
     if (!ev.verified) btn.append(el("span", "unverified", "not found in your text"));
     btn.addEventListener("click", () =>
@@ -254,7 +268,7 @@ export function renderResults(
   const showFinding = (id: string) => flash(els.root.querySelector(`#finding-${id}`));
   for (const source of sources) {
     if (!source.text.trim()) continue;
-    els.markedDraft.append(el("h3", undefined, sourceLabel(source, source.id)));
+    els.markedDraft.append(el("h3", undefined, sourceLabel(source, source.id, countPhotos(sources))));
     els.markedDraft.append(renderMarkedText(source, result.findings, showFinding));
   }
 

@@ -49,12 +49,21 @@ export interface WarningPanelActions {
   onBack(): void;                        // "Back to editing"
   onContinue(): void;                    // "Continue to Share" (checked or not)
   onApplyEdit(edit: SuggestedEdit): void;
-  onImageTextInput(text: string): void;  // the user typed or corrected the photo text
+  onImageTextInput(text: string, index: number): void;  // the user typed or corrected photo `index`'s text (1, 2, ...)
 }
 
 export type MessageKind = "info" | "error";
 
-/** One notice about the photo read (see WarningPanel.setPhotoNotices). */
+/** One notice about a photo read (see WarningPanel.setPhotos). */
+/** What the panel shows for one photo. */
+export interface PhotoView {
+  index: number;
+  label: string;
+  text: string;
+  hint: string;
+  notices: PhotoNotice[];
+}
+
 export interface PhotoNotice {
   kind: "poor" | "warning";
   text: string;
@@ -67,14 +76,14 @@ export interface WarningPanel {
   open(reason: "share-clicked" | "manual"): void;
   close(): void;
   isOpen(): boolean;
-  /** Fill the "Text in the photo" box (from OCR). `hint` explains where it came from. */
-  setImageText(text: string, hint: string): void;
   /**
-   * Notices about the photo read, shown above the "Text in the photo" box:
-   * "poor" = the OCR read is unreliable (low-quality photo); "warning" = some
-   * words unclear, or the text was cut to the size limit. [] clears them.
+   * One "Text in photo N" box per photo (a single photo: "Text in the photo"),
+   * each with its hint and notices ("poor" = unreliable read, text dropped;
+   * "warning" = some words unclear or cut to the limit). `note` is shown above
+   * the boxes (for carousels: "use Instagram's arrows…"). [] clears them.
+   * A box the user is typing in is never overwritten.
    */
-  setPhotoNotices(notices: PhotoNotice[]): void;
+  setPhotos(photos: PhotoView[], note: string): void;
   /** The Databricks/backend status pill in the panel's header (same states as the popup's pill). */
   setBackendStatus(status: Omit<BackendStatusReply, "kind">): void;
   setBusy(busy: boolean): void;
