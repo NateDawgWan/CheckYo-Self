@@ -1,8 +1,8 @@
 // History stored by the Databricks App. Selected with HISTORY_STORE=databricks-app.
 //
 // STATUS: import, list and revoke passed a live round trip (npm run check:history,
-// 2026-11-14). The interpretations endpoints exist in the app (databricks-app/app.py)
-// but are tested only against a fake fetch. Spec: docs/DATABRICKS_APP_API.md.
+// 2026-11-14). A live analysis with history also saved and
+// deleted interpretations through the app (see docs/TEST_RESULTS.md). Spec: docs/DATABRICKS_APP_API.md.
 //
 // Design notes:
 //  - All routes are under /api/ (Databricks Apps only accept token calls there).
